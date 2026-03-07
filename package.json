@@ -23,7 +23,16 @@
       "watchface": false
     },
     "messageKeys": [
-      "dummy"
+      "msgType",
+      "uiType",
+      "screenId",
+      "title",
+      "body",
+      "items",
+      "actionType",
+      "actionScreenId",
+      "actionItemId",
+      "actionIndex"
     ],
     "resources": {
       "media": []
