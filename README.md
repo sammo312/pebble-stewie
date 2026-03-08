@@ -28,6 +28,7 @@ Phone PKJS handles state, calls a backend, and sends compact UI schema to the wa
 - `title`: title
 - `items`: newline-delimited `id|label` for menu
 - `body`: card body for card
+- `actions`: newline-delimited `slot|id|icon` for card action bar (`up|select|down`)
 
 ### Watch -> Phone (`msgType = 2`)
 
@@ -65,13 +66,13 @@ Response:
   "turn": {
     "schemaVersion": "pebble.sdui.v1",
     "screen": {
-      "type": "menu",
+      "type": "card",
       "title": "Question",
-      "body": "Choose one",
-      "options": [
-        { "id": "yes", "label": "Yes", "value": "yes" },
-        { "id": "no", "label": "No", "value": "no" }
-      ]
+      "body": "Choose one action",
+      "actions": [
+        { "slot": "select", "id": "confirm", "icon": "check", "label": "Confirm", "value": "confirm" }
+      ],
+      "options": []
     },
     "input": {
       "mode": "menu_or_voice",
@@ -134,3 +135,9 @@ pebble install --phone <PHONE_IP> --logs
 
 - Agent mode now depends only on your configured backend URL.
 - Voice input still works through watch dictation (`actionType = 4`).
+
+## Future Schema Strategy
+
+- The agent may return action-bar responses now via `screen.actions` on card turns.
+- Next step is expanding schema coverage so the agent can target more of Pebble UI primitives (beyond menu/card/action-bar) in a stable, versioned contract.
+- Keep normalization strict in backend/PKJS so unsupported fields degrade safely instead of crashing render paths.

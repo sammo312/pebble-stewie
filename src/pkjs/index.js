@@ -16,19 +16,30 @@ var MAX_TITLE_LEN = 30;
 var MAX_BODY_LEN = 180;
 var MAX_OPTION_LABEL_LEN = 20;
 var MAX_AGENT_OPTIONS = 5;
+var MAX_CARD_ACTIONS = 3;
+var MAX_ACTION_ID_LEN = 22;
+
+var ACTION_SLOT_ORDER = ['up', 'select', 'down'];
+var VALID_ACTION_ICONS = {
+  play: true,
+  pause: true,
+  check: true,
+  x: true,
+  plus: true,
+  minus: true
+};
 
 var SDUI_SCHEMA_VERSION = 'pebble.sdui.v1';
 var VOICE_INPUT_ITEM_ID = '__voice__';
 var VOICE_ERROR_ITEM_ID = '__voice_error__';
 var VOICE_NOT_SUPPORTED_ITEM_ID = '__voice_not_supported__';
-
-
-  var OPENAI_BACKEND_DEFAULT_URL = 'http://192.168.12.187:8787/turn';
-  var OPENAI_BACKEND_DEFAULT_TOKEN = '';
+var OPENAI_BACKEND_DEFAULT_URL = 'http://192.168.12.187:8787/turn';
+var OPENAI_BACKEND_DEFAULT_TOKEN = '';
 
 var state = {
   currentScreenId: null,
   history: [],
+  currentCardActionsById: {},
   agent: {
     requestNonce: 0,
     activeRequest: null,
@@ -85,7 +96,10 @@ var staticScreens = {
     id: 'status-card',
     type: 'card',
     title: 'System Status',
-    body: 'Phone brain online. Watch renders SDUI from phone state.'
+    body: 'Phone brain online. Watch renders SDUI from phone state.',
+    actions: [
+      { slot: 'select', id: 'status-home', icon: 'check', next: 'root' }
+    ]
   },
   'about-card': {
     id: 'about-card',
@@ -139,6 +153,105 @@ function parseNumber(value, fallback) {
   return isNaN(parsed) ? fallback : parsed;
 }
 
+function sanitizeActionId(id, slot, index) {
+  var raw = sanitizeText(id).toLowerCase();
+  if (!raw) {
+    raw = slot + '_' + index;
+  }
+
+  var cleaned = raw.replace(/[^a-z0-9_-]/g, '_');
+  if (!cleaned) {
+    cleaned = slot + '_' + index;
+  }
+
+  return cleaned.substring(0, MAX_ACTION_ID_LEN);
+}
+
+function normalizeActionSlot(slot) {
+  var value = sanitizeText(slot).toLowerCase();
+  for (var i = 0; i < ACTION_SLOT_ORDER.length; i++) {
+    if (ACTION_SLOT_ORDER[i] === value) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function normalizeActionIcon(icon) {
+  var token = sanitizeText(icon).toLowerCase();
+  if (!VALID_ACTION_ICONS[token]) {
+    return 'check';
+  }
+  return token;
+}
+
+function normalizeScreenActions(rawActions) {
+  if (!rawActions || !rawActions.length) {
+    return [];
+  }
+
+  var actions = [];
+  var seenSlots = {};
+  var seenIds = {};
+  for (var i = 0; i < rawActions.length && actions.length < MAX_CARD_ACTIONS; i++) {
+    var action = rawActions[i];
+    if (!action || typeof action !== 'object') {
+      continue;
+    }
+
+    var slot = normalizeActionSlot(action.slot || action.button);
+    if (!slot || seenSlots[slot]) {
+      continue;
+    }
+
+    var actionId = sanitizeActionId(action.id, slot, i + 1);
+    if (seenIds[actionId]) {
+      actionId = sanitizeActionId(actionId + '_' + (i + 1), slot, i + 1);
+    }
+    if (seenIds[actionId]) {
+      continue;
+    }
+
+    seenSlots[slot] = true;
+    seenIds[actionId] = true;
+
+    var label = limitText(action.label || action.title || actionId, MAX_OPTION_LABEL_LEN);
+    actions.push({
+      id: actionId,
+      slot: slot,
+      icon: normalizeActionIcon(action.icon),
+      label: label || actionId,
+      value: sanitizeText(action.value || action.prompt || label || actionId),
+      next: action.next ? String(action.next) : '',
+      agentPrompt: action.agentPrompt ? String(action.agentPrompt) : '',
+      agentCommand: action.agentCommand ? String(action.agentCommand) : ''
+    });
+  }
+
+  return actions;
+}
+
+function encodeActions(actions) {
+  if (!actions || actions.length === 0) {
+    return '';
+  }
+
+  return actions
+    .slice(0, MAX_CARD_ACTIONS)
+    .map(function(action) {
+      return action.slot + '|' + action.id + '|' + action.icon;
+    })
+    .join('\n');
+}
+
+function buildActionLookup(actions) {
+  var byId = {};
+  for (var i = 0; i < actions.length; i++) {
+    byId[actions[i].id] = actions[i];
+  }
+  return byId;
+}
+
 function encodeItems(items) {
   var safeItems = (items || []).slice(0, MAX_MENU_ITEMS);
 
@@ -169,18 +282,23 @@ function sendRender(screen) {
     return;
   }
 
+  var isMenu = screen.type === 'menu';
+  var normalizedActions = isMenu ? [] : normalizeScreenActions(screen.actions || []);
   var payload = {
     msgType: MSG_TYPE_RENDER,
-    uiType: screen.type === 'menu' ? UI_TYPE_MENU : UI_TYPE_CARD,
+    uiType: isMenu ? UI_TYPE_MENU : UI_TYPE_CARD,
     screenId: sanitizeText(screen.id),
     title: limitText(screen.title || 'Screen', MAX_TITLE_LEN)
   };
 
-  if (screen.type === 'menu') {
+  if (isMenu) {
     payload.items = encodeItems(screen.items);
     payload.body = screen.body ? String(screen.body) : '';
+    state.currentCardActionsById = {};
   } else {
     payload.body = screen.body ? String(screen.body) : '';
+    payload.actions = encodeActions(normalizedActions);
+    state.currentCardActionsById = buildActionLookup(normalizedActions);
   }
 
   Pebble.sendAppMessage(
@@ -369,7 +487,8 @@ function normalizeAgentTurn(rawTurn) {
         type: 'card',
         title: 'Agent',
         body: limitText(rawTurn, MAX_BODY_LEN),
-        options: []
+        options: [],
+        actions: []
       },
       input: {
         mode: 'menu',
@@ -387,7 +506,8 @@ function normalizeAgentTurn(rawTurn) {
     screen: {
       type: 'card',
       title: 'Agent',
-      body: ''
+      body: '',
+      actions: []
     },
     input: {
       mode: 'menu',
@@ -406,6 +526,11 @@ function normalizeAgentTurn(rawTurn) {
   turn.screen.type = screenType;
   turn.screen.title = limitText(screen.title || rawTurn.title || 'Agent', MAX_TITLE_LEN);
   turn.screen.body = limitText(screen.body || rawTurn.body || extractLooseAgentText(rawTurn) || '', MAX_BODY_LEN);
+  if (screenType === 'card') {
+    turn.screen.actions = normalizeScreenActions(screen.actions || rawTurn.actions || []);
+  } else {
+    turn.screen.actions = [];
+  }
 
   var mode = String(input.mode || 'menu').toLowerCase();
   if (mode !== 'menu' && mode !== 'voice' && mode !== 'menu_or_voice') {
@@ -443,7 +568,7 @@ function normalizeAgentTurn(rawTurn) {
 
   var expectResponse = !!input.expectResponse;
   if (!input.hasOwnProperty('expectResponse')) {
-    expectResponse = options.length > 0 || mode !== 'menu';
+    expectResponse = options.length > 0 || turn.screen.actions.length > 0 || mode !== 'menu';
   }
 
   turn.input.mode = mode;
@@ -459,6 +584,29 @@ function normalizeAgentTurn(rawTurn) {
 function renderAgentTurn(turn) {
   state.agent.currentTurn = turn;
   state.agent.currentOptionsById = {};
+
+  if (turn.screen.type === 'card' && (!turn.input.expectResponse || turn.screen.actions.length > 0)) {
+    if (turn.input.expectResponse) {
+      for (var actionIndex = 0; actionIndex < turn.screen.actions.length; actionIndex++) {
+        var action = turn.screen.actions[actionIndex];
+        state.agent.currentOptionsById[action.id] = {
+          id: action.id,
+          label: action.label,
+          value: action.value || action.label
+        };
+      }
+    }
+
+    state.agent.turnIndex++;
+    sendRender({
+      id: 'agent-card-' + state.agent.turnIndex,
+      type: 'card',
+      title: turn.screen.title,
+      body: turn.screen.body,
+      actions: turn.screen.actions
+    });
+    return;
+  }
 
   if (!turn.input.expectResponse) {
     state.agent.turnIndex++;
@@ -702,6 +850,45 @@ function handleStaticMenuSelect(action) {
   }
 }
 
+function handleCardActionSelect(action) {
+  var selectedId = action.itemId || '';
+  if (!selectedId) {
+    return false;
+  }
+
+  var selectedAction = state.currentCardActionsById[selectedId];
+  if (!selectedAction) {
+    return false;
+  }
+
+  if (isAgentScreenId(state.currentScreenId) && handleAgentTurnSelect(action)) {
+    return true;
+  }
+
+  if (selectedAction.agentCommand === 'reset') {
+    resetAgentConversation(true);
+    renderAgentStatusCard('Agent', 'Thread reset.');
+    return true;
+  }
+
+  if (selectedAction.agentPrompt) {
+    submitAgentTextInput(selectedAction.agentPrompt, 'card_action');
+    return true;
+  }
+
+  if (isAgentScreenId(state.currentScreenId) && selectedAction.value) {
+    submitAgentTextInput('User selected card action ' + selectedAction.id + ': ' + selectedAction.value, 'card_action');
+    return true;
+  }
+
+  if (selectedAction.next) {
+    transitionTo(selectedAction.next, true);
+    return true;
+  }
+
+  return true;
+}
+
 function handleAgentTurnSelect(action) {
   var selectedId = action.itemId || '';
   if (!selectedId) {
@@ -722,6 +909,10 @@ function handleAgentTurnSelect(action) {
 }
 
 function handleSelect(action) {
+  if (handleCardActionSelect(action)) {
+    return;
+  }
+
   if (isAgentScreenId(state.currentScreenId)) {
     if (handleAgentTurnSelect(action)) {
       return;

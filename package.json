@@ -32,6 +32,7 @@
       "title",
       "body",
       "items",
+      "actions",
       "actionType",
       "actionScreenId",
       "actionItemId",
@@ -39,7 +40,38 @@
       "actionText"
     ],
     "resources": {
-      "media": []
+      "media": [
+        {
+          "type": "png",
+          "name": "ICON_ACTION_PLAY",
+          "file": "icons/action_play.png"
+        },
+        {
+          "type": "png",
+          "name": "ICON_ACTION_PAUSE",
+          "file": "icons/action_pause.png"
+        },
+        {
+          "type": "png",
+          "name": "ICON_ACTION_CHECK",
+          "file": "icons/action_check.png"
+        },
+        {
+          "type": "png",
+          "name": "ICON_ACTION_X",
+          "file": "icons/action_x.png"
+        },
+        {
+          "type": "png",
+          "name": "ICON_ACTION_PLUS",
+          "file": "icons/action_plus.png"
+        },
+        {
+          "type": "png",
+          "name": "ICON_ACTION_MINUS",
+          "file": "icons/action_minus.png"
+        }
+      ]
     }
   }
 }

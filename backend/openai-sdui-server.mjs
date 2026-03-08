@@ -16,6 +16,8 @@ const OPENAI_LOG_MAX_CHARS = Number(process.env.OPENAI_LOG_MAX_CHARS || 2000);
 const OPENAI_DEBUG_LOG = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.OPENAI_DEBUG_LOG || '').trim().toLowerCase()
 );
+const VALID_ACTION_SLOTS = new Set(['up', 'select', 'down']);
+const VALID_ACTION_ICONS = new Set(['play', 'pause', 'check', 'x', 'plus', 'minus']);
 
 const sessions = new Map();
 
@@ -29,6 +31,9 @@ const SYSTEM_PROMPT = [
   '    "type": "menu" | "card",',
   '    "title": "short title",',
   '    "body": "short body",',
+  '    "actions": [',
+  '      { "slot": "select", "id": "confirm", "icon": "check", "label": "Confirm", "value": "confirm" }',
+  '    ],',
   '    "options": [',
   '      { "id": "yes", "label": "Yes", "value": "yes" }',
   '    ]',
@@ -42,6 +47,9 @@ const SYSTEM_PROMPT = [
   '- Keep title <= 24 chars.',
   '- Keep body <= 140 chars.',
   '- Use max 5 options with labels <= 18 chars.',
+  '- actions are only for card screens; max 3 actions.',
+  '- action slots must be unique and one of: up, select, down.',
+  '- action icons must be one of: play, pause, check, x, plus, minus.',
   '- For yes/no, use option ids yes/no.',
   '- Use input.mode = menu_or_voice if user can answer by voice.',
   '- If no user response needed, return a card and input.expectResponse = false.'
@@ -143,6 +151,12 @@ function sanitizeOptionId(value, index) {
   return raw.slice(0, 22);
 }
 
+function sanitizeActionId(value, slot, index) {
+  const base = sanitizeText(value).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  const fallback = `${slot || 'action'}_${index}`;
+  return (base || fallback).slice(0, 22);
+}
+
 function extractLooseText(rawTurn) {
   if (!rawTurn || typeof rawTurn !== 'object') {
     return '';
@@ -218,9 +232,52 @@ function normalizeTurn(rawTurn) {
     });
   }
 
+  const actions = [];
+  const actionIds = new Set();
+  const actionSlots = new Set();
+  const sourceActions = Array.isArray(screen.actions)
+    ? screen.actions
+    : (Array.isArray(rawTurn.actions) ? rawTurn.actions : []);
+  for (let i = 0; i < sourceActions.length && actions.length < 3; i++) {
+    const action = sourceActions[i];
+    if (!action || typeof action !== 'object') {
+      continue;
+    }
+
+    const slot = sanitizeText(action.slot || action.button).toLowerCase();
+    if (!VALID_ACTION_SLOTS.has(slot) || actionSlots.has(slot)) {
+      continue;
+    }
+
+    let id = sanitizeActionId(action.id, slot, i + 1);
+    if (actionIds.has(id)) {
+      id = sanitizeActionId(`${id}_${i + 1}`, slot, i + 1);
+    }
+    if (actionIds.has(id)) {
+      continue;
+    }
+
+    const iconCandidate = sanitizeText(action.icon).toLowerCase();
+    const icon = VALID_ACTION_ICONS.has(iconCandidate) ? iconCandidate : 'check';
+    const label = limitText(action.label || action.title || id, 18);
+    if (!label) {
+      continue;
+    }
+
+    actionSlots.add(slot);
+    actionIds.add(id);
+    actions.push({
+      slot,
+      id,
+      icon,
+      label,
+      value: sanitizeText(action.value || action.prompt || label)
+    });
+  }
+
   let expectResponse = Boolean(input.expectResponse);
   if (!Object.prototype.hasOwnProperty.call(input, 'expectResponse')) {
-    expectResponse = options.length > 0 || mode !== 'menu';
+    expectResponse = options.length > 0 || actions.length > 0 || mode !== 'menu';
   }
 
   const looseBody = extractLooseText(rawTurn);
@@ -230,7 +287,8 @@ function normalizeTurn(rawTurn) {
       type: screenType,
       title: limitText(screen.title || rawTurn.title || 'Agent', 24),
       body: limitText(screen.body || rawTurn.body || looseBody || '', 140),
-      options
+      options,
+      actions: screenType === 'card' ? actions : []
     },
     input: {
       mode,
