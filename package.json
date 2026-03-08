@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "keywords": ["pebble-app"],
   "private": true,
+  "scripts": {
+    "backend": "node backend/openai-sdui-server.mjs"
+  },
   "dependencies": {},
   "pebble": {
     "displayName": "pebble-stewie",
@@ -32,7 +35,8 @@
       "actionType",
       "actionScreenId",
       "actionItemId",
-      "actionIndex"
+      "actionIndex",
+      "actionText"
     ],
     "resources": {
       "media": []
