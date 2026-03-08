@@ -1,4 +1,5 @@
 # pebble-stewie (SDUI + OpenAI Backend)
+<img width="300" height="300" alt="pebble-stew-removebg-preview" src="https://github.com/user-attachments/assets/b73c4833-aa5e-4b4d-a417-29d867171e91" />
 
 Pebble app prototype where the watch is only a renderer.
 Phone PKJS handles state, calls a backend, and sends compact UI schema to the watch.
