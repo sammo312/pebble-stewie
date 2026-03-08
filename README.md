@@ -1,5 +1,5 @@
 # pebble-stewie (SDUI + OpenAI Backend)
-<img width="1024" height="1024" alt="kawaistew" src="https://github.com/user-attachments/assets/d1275c0d-d4bb-41a9-9bb0-7a1b7b026958" />
+<img width="300" height="300" alt="kawaistew" src="https://github.com/user-attachments/assets/d1275c0d-d4bb-41a9-9bb0-7a1b7b026958" />
 
 
 Pebble app prototype where the watch is only a renderer.
