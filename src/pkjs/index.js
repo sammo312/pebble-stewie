@@ -1,40 +1,46 @@
 'use strict';
 
-var MSG_TYPE_RENDER = 1;
-var MSG_TYPE_ACTION = 2;
+// -----------------------------------------------------------------------------
+// Module wiring
+// -----------------------------------------------------------------------------
 
-var UI_TYPE_MENU = 1;
-var UI_TYPE_CARD = 2;
+var constants = require('./constants');
+var staticScreens = require('./static-screens');
+var textUtils = require('./text-utils');
+var screenActions = require('./screen-actions');
+var agentTurn = require('./agent-turn');
 
-var ACTION_TYPE_READY = 1;
-var ACTION_TYPE_SELECT = 2;
-var ACTION_TYPE_BACK = 3;
-var ACTION_TYPE_VOICE = 4;
+var MSG_TYPE_RENDER = constants.MSG_TYPE_RENDER;
+var MSG_TYPE_ACTION = constants.MSG_TYPE_ACTION;
+var UI_TYPE_MENU = constants.UI_TYPE_MENU;
+var UI_TYPE_CARD = constants.UI_TYPE_CARD;
+var ACTION_TYPE_READY = constants.ACTION_TYPE_READY;
+var ACTION_TYPE_SELECT = constants.ACTION_TYPE_SELECT;
+var ACTION_TYPE_BACK = constants.ACTION_TYPE_BACK;
+var ACTION_TYPE_VOICE = constants.ACTION_TYPE_VOICE;
+var MAX_TITLE_LEN = constants.MAX_TITLE_LEN;
+var MAX_BODY_LEN = constants.MAX_BODY_LEN;
+var VOICE_INPUT_ITEM_ID = constants.VOICE_INPUT_ITEM_ID;
+var VOICE_ERROR_ITEM_ID = constants.VOICE_ERROR_ITEM_ID;
+var VOICE_NOT_SUPPORTED_ITEM_ID = constants.VOICE_NOT_SUPPORTED_ITEM_ID;
+var OPENAI_BACKEND_DEFAULT_URL = constants.OPENAI_BACKEND_DEFAULT_URL;
+var OPENAI_BACKEND_DEFAULT_TOKEN = constants.OPENAI_BACKEND_DEFAULT_TOKEN;
+var SDUI_SCHEMA_VERSION = constants.SDUI_SCHEMA_VERSION;
 
-var MAX_MENU_ITEMS = 8;
-var MAX_TITLE_LEN = 30;
-var MAX_BODY_LEN = 180;
-var MAX_OPTION_LABEL_LEN = 20;
-var MAX_AGENT_OPTIONS = 5;
-var MAX_CARD_ACTIONS = 3;
-var MAX_ACTION_ID_LEN = 22;
+var sanitizeText = textUtils.sanitizeText;
+var limitText = textUtils.limitText;
+var parseNumber = textUtils.parseNumber;
 
-var ACTION_SLOT_ORDER = ['up', 'select', 'down'];
-var VALID_ACTION_ICONS = {
-  play: true,
-  pause: true,
-  check: true,
-  x: true,
-  plus: true,
-  minus: true
-};
+var normalizeScreenActions = screenActions.normalizeScreenActions;
+var encodeActions = screenActions.encodeActions;
+var buildActionLookup = screenActions.buildActionLookup;
+var encodeItems = screenActions.encodeItems;
 
-var SDUI_SCHEMA_VERSION = 'pebble.sdui.v1';
-var VOICE_INPUT_ITEM_ID = '__voice__';
-var VOICE_ERROR_ITEM_ID = '__voice_error__';
-var VOICE_NOT_SUPPORTED_ITEM_ID = '__voice_not_supported__';
-var OPENAI_BACKEND_DEFAULT_URL = 'http://192.168.12.187:8787/turn';
-var OPENAI_BACKEND_DEFAULT_TOKEN = '';
+var normalizeAgentTurn = agentTurn.normalizeAgentTurn;
+
+// -----------------------------------------------------------------------------
+// Runtime state
+// -----------------------------------------------------------------------------
 
 var state = {
   currentScreenId: null,
@@ -52,217 +58,9 @@ var state = {
   }
 };
 
-var staticScreens = {
-  root: {
-    id: 'root',
-    type: 'menu',
-    title: 'Main Menu',
-    items: [
-      { id: 'controls', label: 'Controls', next: 'controls' },
-      { id: 'agent-home', label: 'Agent SDUI', next: 'agent-home' },
-      { id: 'status', label: 'Status Card', next: 'status-card' },
-      { id: 'time', label: 'Phone Time', next: 'time-card' },
-      { id: 'about', label: 'About', next: 'about-card' }
-    ]
-  },
-  controls: {
-    id: 'controls',
-    type: 'menu',
-    title: 'Controls',
-    items: [
-      { id: 'start', label: 'Start Task', next: 'start-card' },
-      { id: 'stop', label: 'Stop Task', next: 'stop-card' },
-      { id: 'diag', label: 'Diagnostics', next: 'diag-card' }
-    ]
-  },
-  'agent-home': {
-    id: 'agent-home',
-    type: 'menu',
-    title: 'Agent SDUI',
-    items: [
-      { id: 'agent-quickstart', label: 'Start Conversation', agentPrompt: 'Start a useful short conversation and ask me a yes or no question first.' },
-      { id: VOICE_INPUT_ITEM_ID, label: 'Speak to Agent' },
-      { id: 'agent-reset', label: 'Reset Thread', agentCommand: 'reset' },
-      { id: 'agent-help', label: 'Setup Help', next: 'agent-help-card' }
-    ]
-  },
-  'agent-help-card': {
-    id: 'agent-help-card',
-    type: 'card',
-    title: 'Agent Setup',
-    body: 'Set localStorage openai-backend-url and optional openai-backend-token.'
-  },
-  'status-card': {
-    id: 'status-card',
-    type: 'card',
-    title: 'System Status',
-    body: 'Phone brain online. Watch renders SDUI from phone state.',
-    actions: [
-      { slot: 'select', id: 'status-home', icon: 'check', next: 'root' }
-    ]
-  },
-  'about-card': {
-    id: 'about-card',
-    type: 'card',
-    title: 'About',
-    body: 'Watch renders. Phone + backend decide next screens.'
-  },
-  'start-card': {
-    id: 'start-card',
-    type: 'card',
-    title: 'Started',
-    body: 'Start action acknowledged by phone.'
-  },
-  'stop-card': {
-    id: 'stop-card',
-    type: 'card',
-    title: 'Stopped',
-    body: 'Stop action acknowledged by phone.'
-  },
-  'diag-card': {
-    id: 'diag-card',
-    type: 'card',
-    title: 'Diagnostics',
-    body: 'All checks passed. Rendering loop healthy.'
-  }
-};
-
-function sanitizeText(value) {
-  if (value === undefined || value === null) {
-    return '';
-  }
-
-  return String(value).replace(/\n/g, ' ').replace(/\|/g, '/').trim();
-}
-
-function limitText(value, maxLen) {
-  var text = sanitizeText(value);
-  if (!text) {
-    return '';
-  }
-
-  if (text.length <= maxLen) {
-    return text;
-  }
-
-  return text.substring(0, maxLen - 3) + '...';
-}
-
-function parseNumber(value, fallback) {
-  var parsed = Number(value);
-  return isNaN(parsed) ? fallback : parsed;
-}
-
-function sanitizeActionId(id, slot, index) {
-  var raw = sanitizeText(id).toLowerCase();
-  if (!raw) {
-    raw = slot + '_' + index;
-  }
-
-  var cleaned = raw.replace(/[^a-z0-9_-]/g, '_');
-  if (!cleaned) {
-    cleaned = slot + '_' + index;
-  }
-
-  return cleaned.substring(0, MAX_ACTION_ID_LEN);
-}
-
-function normalizeActionSlot(slot) {
-  var value = sanitizeText(slot).toLowerCase();
-  for (var i = 0; i < ACTION_SLOT_ORDER.length; i++) {
-    if (ACTION_SLOT_ORDER[i] === value) {
-      return value;
-    }
-  }
-  return '';
-}
-
-function normalizeActionIcon(icon) {
-  var token = sanitizeText(icon).toLowerCase();
-  if (!VALID_ACTION_ICONS[token]) {
-    return 'check';
-  }
-  return token;
-}
-
-function normalizeScreenActions(rawActions) {
-  if (!rawActions || !rawActions.length) {
-    return [];
-  }
-
-  var actions = [];
-  var seenSlots = {};
-  var seenIds = {};
-  for (var i = 0; i < rawActions.length && actions.length < MAX_CARD_ACTIONS; i++) {
-    var action = rawActions[i];
-    if (!action || typeof action !== 'object') {
-      continue;
-    }
-
-    var slot = normalizeActionSlot(action.slot || action.button);
-    if (!slot || seenSlots[slot]) {
-      continue;
-    }
-
-    var actionId = sanitizeActionId(action.id, slot, i + 1);
-    if (seenIds[actionId]) {
-      actionId = sanitizeActionId(actionId + '_' + (i + 1), slot, i + 1);
-    }
-    if (seenIds[actionId]) {
-      continue;
-    }
-
-    seenSlots[slot] = true;
-    seenIds[actionId] = true;
-
-    var label = limitText(action.label || action.title || actionId, MAX_OPTION_LABEL_LEN);
-    actions.push({
-      id: actionId,
-      slot: slot,
-      icon: normalizeActionIcon(action.icon),
-      label: label || actionId,
-      value: sanitizeText(action.value || action.prompt || label || actionId),
-      next: action.next ? String(action.next) : '',
-      agentPrompt: action.agentPrompt ? String(action.agentPrompt) : '',
-      agentCommand: action.agentCommand ? String(action.agentCommand) : ''
-    });
-  }
-
-  return actions;
-}
-
-function encodeActions(actions) {
-  if (!actions || actions.length === 0) {
-    return '';
-  }
-
-  return actions
-    .slice(0, MAX_CARD_ACTIONS)
-    .map(function(action) {
-      return action.slot + '|' + action.id + '|' + action.icon;
-    })
-    .join('\n');
-}
-
-function buildActionLookup(actions) {
-  var byId = {};
-  for (var i = 0; i < actions.length; i++) {
-    byId[actions[i].id] = actions[i];
-  }
-  return byId;
-}
-
-function encodeItems(items) {
-  var safeItems = (items || []).slice(0, MAX_MENU_ITEMS);
-
-  return safeItems
-    .map(function(item, index) {
-      var label = limitText(item.label || item.title || ('Item ' + (index + 1)), MAX_OPTION_LABEL_LEN);
-      var id = sanitizeText(item.id || ('item-' + index));
-      return id + '|' + label;
-    })
-    .join('\n');
-}
+// -----------------------------------------------------------------------------
+// Screen rendering and navigation
+// -----------------------------------------------------------------------------
 
 function resolveScreen(screenId) {
   if (screenId === 'time-card') {
@@ -350,6 +148,10 @@ function isAgentScreenId(screenId) {
   return !!screenId && screenId.indexOf('agent-') === 0;
 }
 
+// -----------------------------------------------------------------------------
+// Environment and backend configuration
+// -----------------------------------------------------------------------------
+
 function getAgentConfig() {
   return {
     backendUrl: localStorage.getItem('openai-backend-url') || OPENAI_BACKEND_DEFAULT_URL,
@@ -397,6 +199,10 @@ function getWatchProfile() {
   return profile;
 }
 
+// -----------------------------------------------------------------------------
+// Agent lifecycle helpers
+// -----------------------------------------------------------------------------
+
 function cancelAgentRequest() {
   if (!state.agent.activeRequest) {
     return;
@@ -437,154 +243,11 @@ function renderAgentStatusCard(title, body) {
   });
 }
 
-function sanitizeOptionId(id, index) {
-  var raw = sanitizeText(id).toLowerCase();
-  if (!raw) {
-    return 'option_' + index;
-  }
-
-  var cleaned = raw.replace(/[^a-z0-9_-]/g, '_');
-  if (!cleaned) {
-    cleaned = 'option_' + index;
-  }
-
-  return cleaned.substring(0, 22);
-}
-
-function extractLooseAgentText(rawTurn) {
-  if (!rawTurn || typeof rawTurn !== 'object') {
-    return '';
-  }
-
-  var candidates = [
-    rawTurn.body,
-    rawTurn.text,
-    rawTurn.message,
-    rawTurn.response,
-    rawTurn.output_text,
-    rawTurn.reply
-  ];
-
-  for (var i = 0; i < candidates.length; i++) {
-    var text = sanitizeText(candidates[i]);
-    if (text) {
-      return text;
-    }
-  }
-
-  if (typeof rawTurn.output === 'string') {
-    return sanitizeText(rawTurn.output);
-  }
-
-  return '';
-}
-
-function normalizeAgentTurn(rawTurn) {
-  if (typeof rawTurn === 'string') {
-    return {
-      schemaVersion: SDUI_SCHEMA_VERSION,
-      screen: {
-        type: 'card',
-        title: 'Agent',
-        body: limitText(rawTurn, MAX_BODY_LEN),
-        options: [],
-        actions: []
-      },
-      input: {
-        mode: 'menu',
-        expectResponse: false
-      }
-    };
-  }
-
-  if (!rawTurn || typeof rawTurn !== 'object') {
-    return null;
-  }
-
-  var turn = {
-    schemaVersion: SDUI_SCHEMA_VERSION,
-    screen: {
-      type: 'card',
-      title: 'Agent',
-      body: '',
-      actions: []
-    },
-    input: {
-      mode: 'menu',
-      expectResponse: false
-    }
-  };
-
-  var screen = rawTurn.screen || {};
-  var input = rawTurn.input || {};
-
-  var screenType = String(screen.type || rawTurn.type || 'card').toLowerCase();
-  if (screenType !== 'menu' && screenType !== 'card') {
-    screenType = 'card';
-  }
-
-  turn.screen.type = screenType;
-  turn.screen.title = limitText(screen.title || rawTurn.title || 'Agent', MAX_TITLE_LEN);
-  turn.screen.body = limitText(screen.body || rawTurn.body || extractLooseAgentText(rawTurn) || '', MAX_BODY_LEN);
-  if (screenType === 'card') {
-    turn.screen.actions = normalizeScreenActions(screen.actions || rawTurn.actions || []);
-  } else {
-    turn.screen.actions = [];
-  }
-
-  var mode = String(input.mode || 'menu').toLowerCase();
-  if (mode !== 'menu' && mode !== 'voice' && mode !== 'menu_or_voice') {
-    mode = 'menu';
-  }
-
-  var options = [];
-  var seenIds = {};
-  var rawOptions = screen.options || rawTurn.options || [];
-  for (var i = 0; i < rawOptions.length && options.length < MAX_AGENT_OPTIONS; i++) {
-    var option = rawOptions[i];
-    if (!option || typeof option !== 'object') {
-      continue;
-    }
-
-    var optionId = sanitizeOptionId(option.id, i + 1);
-    if (seenIds[optionId]) {
-      optionId = optionId + '_' + (i + 1);
-    }
-    seenIds[optionId] = true;
-
-    var label = limitText(option.label || option.title || optionId, MAX_OPTION_LABEL_LEN);
-    if (!label) {
-      continue;
-    }
-
-    options.push({
-      id: optionId,
-      label: label,
-      value: sanitizeText(option.value || option.prompt || label)
-    });
-  }
-
-  turn.screen.options = options;
-
-  var expectResponse = !!input.expectResponse;
-  if (!input.hasOwnProperty('expectResponse')) {
-    expectResponse = options.length > 0 || turn.screen.actions.length > 0 || mode !== 'menu';
-  }
-
-  turn.input.mode = mode;
-  turn.input.expectResponse = expectResponse;
-
-  if (!turn.screen.body && turn.screen.type === 'card') {
-    turn.screen.body = expectResponse ? 'Select or speak a response.' : 'Done.';
-  }
-
-  return turn;
-}
-
 function renderAgentTurn(turn) {
   state.agent.currentTurn = turn;
   state.agent.currentOptionsById = {};
 
+  // Card turns can be final, or interactive when they include action buttons.
   if (turn.screen.type === 'card' && (!turn.input.expectResponse || turn.screen.actions.length > 0)) {
     if (turn.input.expectResponse) {
       for (var actionIndex = 0; actionIndex < turn.screen.actions.length; actionIndex++) {
@@ -655,6 +318,10 @@ function renderAgentFallback(text) {
     body: limitText(text || 'No structured response.', MAX_BODY_LEN)
   });
 }
+
+// -----------------------------------------------------------------------------
+// Backend IO
+// -----------------------------------------------------------------------------
 
 function postJson(url, token, body, onDone) {
   var xhr = new XMLHttpRequest();
@@ -809,6 +476,10 @@ function leaveAgentConversation() {
   state.agent.conversationStarted = false;
 }
 
+// -----------------------------------------------------------------------------
+// Input handling
+// -----------------------------------------------------------------------------
+
 function handleBack() {
   if (isAgentScreenId(state.currentScreenId)) {
     leaveAgentConversation();
@@ -861,6 +532,7 @@ function handleCardActionSelect(action) {
     return false;
   }
 
+  // Agent cards reserve action button ids as response options first.
   if (isAgentScreenId(state.currentScreenId) && handleAgentTurnSelect(action)) {
     return true;
   }
@@ -975,6 +647,10 @@ function handleActionMessage(payload) {
     handleVoiceAction(action);
   }
 }
+
+// -----------------------------------------------------------------------------
+// Pebble event bridge
+// -----------------------------------------------------------------------------
 
 Pebble.addEventListener('ready', function() {
   console.log('Phone brain ready');
