@@ -6,6 +6,11 @@ TextLayer *s_menu_body_layer = NULL;
 TextLayer *s_card_title_layer = NULL;
 TextLayer *s_card_body_layer = NULL;
 ActionBarLayer *s_action_bar_layer = NULL;
+Layer *s_menu_action_hint_layer = NULL;
+ActionMenu *s_menu_action_menu = NULL;
+ActionMenuLevel *s_menu_action_root_level = NULL;
+ScrollLayer *s_scroll_layer = NULL;
+TextLayer *s_scroll_body_layer = NULL;
 DictationSession *s_dictation_session = NULL;
 GBitmap *s_icon_play = NULL;
 GBitmap *s_icon_pause = NULL;
@@ -17,6 +22,8 @@ GRect s_window_bounds;
 
 MenuItem s_menu_items[MAX_MENU_ITEMS];
 uint16_t s_menu_item_count = 0;
+MenuAction s_menu_actions[MAX_MENU_ACTIONS];
+uint16_t s_menu_action_count = 0;
 CardAction s_card_actions[MAX_CARD_ACTIONS];
 uint16_t s_card_action_count = 0;
 
@@ -24,6 +31,7 @@ char s_menu_title[MAX_TITLE_LEN] = "Menu";
 char s_menu_body[MAX_BODY_LEN] = "";
 char s_card_title[MAX_TITLE_LEN] = "Loading";
 char s_card_body[MAX_BODY_LEN] = "Waiting for phone...";
+char s_scroll_body[MAX_SCROLL_BODY_LEN] = "";
 char s_current_screen_id[MAX_SCREEN_ID_LEN] = "";
 uint8_t s_current_ui_type = UI_TYPE_CARD;
 uint16_t s_selected_menu_row = 0;

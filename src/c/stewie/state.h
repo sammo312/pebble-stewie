@@ -5,8 +5,10 @@
 
 #define MAX_TITLE_LEN 32
 #define MAX_BODY_LEN 192
+#define MAX_SCROLL_BODY_LEN 1040
 #define MAX_SCREEN_ID_LEN 32
 #define MAX_MENU_ITEMS 8
+#define MAX_MENU_ACTIONS 6
 #define MAX_ITEM_ID_LEN 24
 #define MAX_ITEM_LABEL_LEN 32
 #define MAX_CARD_ACTIONS NUM_ACTION_BAR_ITEMS
@@ -24,6 +26,7 @@ enum MessageType {
 enum UiType {
   UI_TYPE_MENU = 1,
   UI_TYPE_CARD = 2,
+  UI_TYPE_SCROLL = 3,
 };
 
 enum ActionType {
@@ -37,6 +40,11 @@ typedef struct {
   char id[MAX_ITEM_ID_LEN];
   char label[MAX_ITEM_LABEL_LEN];
 } MenuItem;
+
+typedef struct {
+  char id[MAX_ITEM_ID_LEN];
+  char label[MAX_ITEM_LABEL_LEN];
+} MenuAction;
 
 typedef struct {
   bool active;
@@ -60,6 +68,11 @@ extern TextLayer *s_menu_body_layer;
 extern TextLayer *s_card_title_layer;
 extern TextLayer *s_card_body_layer;
 extern ActionBarLayer *s_action_bar_layer;
+extern Layer *s_menu_action_hint_layer;
+extern ActionMenu *s_menu_action_menu;
+extern ActionMenuLevel *s_menu_action_root_level;
+extern ScrollLayer *s_scroll_layer;
+extern TextLayer *s_scroll_body_layer;
 extern DictationSession *s_dictation_session;
 extern GBitmap *s_icon_play;
 extern GBitmap *s_icon_pause;
@@ -71,6 +84,8 @@ extern GRect s_window_bounds;
 
 extern MenuItem s_menu_items[MAX_MENU_ITEMS];
 extern uint16_t s_menu_item_count;
+extern MenuAction s_menu_actions[MAX_MENU_ACTIONS];
+extern uint16_t s_menu_action_count;
 extern CardAction s_card_actions[MAX_CARD_ACTIONS];
 extern uint16_t s_card_action_count;
 
@@ -78,6 +93,7 @@ extern char s_menu_title[MAX_TITLE_LEN];
 extern char s_menu_body[MAX_BODY_LEN];
 extern char s_card_title[MAX_TITLE_LEN];
 extern char s_card_body[MAX_BODY_LEN];
+extern char s_scroll_body[MAX_SCROLL_BODY_LEN];
 extern char s_current_screen_id[MAX_SCREEN_ID_LEN];
 extern uint8_t s_current_ui_type;
 extern uint16_t s_selected_menu_row;

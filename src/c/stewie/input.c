@@ -93,6 +93,24 @@ static CardAction *prv_get_card_action(ButtonId button_id) {
   return action;
 }
 
+static void prv_menu_action_did_close(ActionMenu *menu, const ActionMenuItem *performed_action, void *context) {
+  if (s_menu_action_root_level) {
+    action_menu_hierarchy_destroy(s_menu_action_root_level, NULL, NULL);
+    s_menu_action_root_level = NULL;
+  }
+
+  s_menu_action_menu = NULL;
+}
+
+static void prv_menu_action_performed(ActionMenu *menu, const ActionMenuItem *action, void *context) {
+  MenuAction *selected = (MenuAction *)action_menu_item_get_action_data(action);
+  if (!selected || selected->id[0] == '\0') {
+    return;
+  }
+
+  stewie_send_action(ACTION_TYPE_SELECT, -1, selected->id, NULL);
+}
+
 static void prv_send_selected_menu_action(void) {
   if (s_current_ui_type != UI_TYPE_MENU || s_menu_item_count == 0) {
     return;
@@ -122,6 +140,102 @@ static bool prv_send_card_action_for_button(ButtonId button_id) {
   }
 
   stewie_send_action(ACTION_TYPE_SELECT, -1, action->id, NULL);
+  return true;
+}
+
+void stewie_reset_menu_actions(void) {
+  if (s_menu_action_menu) {
+    action_menu_close(s_menu_action_menu, false);
+  }
+  memset(s_menu_actions, 0, sizeof(s_menu_actions));
+  s_menu_action_count = 0;
+}
+
+void stewie_parse_menu_actions(const char *encoded_actions) {
+  stewie_reset_menu_actions();
+
+  if (!encoded_actions || encoded_actions[0] == '\0') {
+    return;
+  }
+
+  const char *cursor = encoded_actions;
+  while (*cursor != '\0' && s_menu_action_count < MAX_MENU_ACTIONS) {
+    const char *line_end = strchr(cursor, '\n');
+    if (!line_end) {
+      line_end = cursor + strlen(cursor);
+    }
+
+    size_t line_len = (size_t)(line_end - cursor);
+    if (line_len > 0) {
+      const char *separator = memchr(cursor, '|', line_len);
+      MenuAction *action = &s_menu_actions[s_menu_action_count];
+
+      if (separator) {
+        size_t id_len = (size_t)(separator - cursor);
+        size_t label_len = (size_t)(line_end - separator - 1);
+        stewie_copy_with_limit(action->id, sizeof(action->id), cursor, id_len);
+        stewie_copy_with_limit(action->label, sizeof(action->label), separator + 1, label_len);
+      } else {
+        stewie_copy_with_limit(action->id, sizeof(action->id), cursor, line_len);
+        stewie_copy_with_limit(action->label, sizeof(action->label), cursor, line_len);
+      }
+
+      if (action->label[0] != '\0') {
+        if (action->id[0] == '\0') {
+          stewie_copy_with_limit(action->id, sizeof(action->id), action->label, strlen(action->label));
+        }
+        s_menu_action_count++;
+      }
+    }
+
+    if (*line_end == '\0') {
+      break;
+    }
+
+    cursor = line_end + 1;
+  }
+}
+
+bool stewie_open_menu_actions(void) {
+  if (s_current_ui_type != UI_TYPE_SCROLL || s_menu_action_count == 0 || s_menu_action_menu) {
+    return false;
+  }
+
+  ActionMenuLevel *root_level = action_menu_level_create(s_menu_action_count);
+  if (!root_level) {
+    return false;
+  }
+
+  for (uint16_t i = 0; i < s_menu_action_count; i++) {
+    MenuAction *action = &s_menu_actions[i];
+    if (action->label[0] == '\0') {
+      continue;
+    }
+
+    action_menu_level_add_action(root_level, action->label, prv_menu_action_performed, action);
+  }
+
+  ActionMenuConfig config = {
+    .root_level = root_level,
+    .context = NULL,
+    .colors = {
+      .background = GColorBlack,
+      .foreground = GColorWhite
+    },
+    .will_close = NULL,
+    .did_close = prv_menu_action_did_close,
+    .align = ActionMenuAlignCenter
+  };
+
+  s_menu_action_root_level = root_level;
+  s_menu_action_menu = action_menu_open(&config);
+  if (!s_menu_action_menu) {
+    action_menu_hierarchy_destroy(root_level, NULL, NULL);
+    s_menu_action_root_level = NULL;
+    return false;
+  }
+
+  action_menu_set_result_window(s_menu_action_menu, s_window);
   return true;
 }
 
@@ -216,6 +330,13 @@ void stewie_apply_card_actions(void) {
 }
 
 void stewie_select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_current_ui_type == UI_TYPE_SCROLL) {
+    if (stewie_open_menu_actions()) {
+      return;
+    }
+    return;
+  }
+
   if (prv_send_card_action_for_button(BUTTON_ID_SELECT)) {
     return;
   }
@@ -223,7 +344,17 @@ void stewie_select_click_handler(ClickRecognizerRef recognizer, void *context) {
   prv_send_selected_menu_action();
 }
 
+void stewie_select_long_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (stewie_open_menu_actions()) {
+    return;
+  }
+}
+
 void stewie_up_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_current_ui_type == UI_TYPE_SCROLL) {
+    return;  // ScrollLayer handles UP/DOWN natively
+  }
+
   if (prv_send_card_action_for_button(BUTTON_ID_UP)) {
     return;
   }
@@ -238,6 +369,10 @@ void stewie_up_click_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 void stewie_down_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_current_ui_type == UI_TYPE_SCROLL) {
+    return;  // ScrollLayer handles UP/DOWN natively
+  }
+
   if (prv_send_card_action_for_button(BUTTON_ID_DOWN)) {
     return;
   }
@@ -257,11 +392,10 @@ void stewie_back_click_handler(ClickRecognizerRef recognizer, void *context) {
 
 void stewie_window_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_BACK, stewie_back_click_handler);
-  if (!s_action_bar_layer) {
-    window_single_click_subscribe(BUTTON_ID_UP, stewie_up_click_handler);
-    window_single_click_subscribe(BUTTON_ID_SELECT, stewie_select_click_handler);
-    window_single_click_subscribe(BUTTON_ID_DOWN, stewie_down_click_handler);
-  }
+  window_single_click_subscribe(BUTTON_ID_UP, stewie_up_click_handler);
+  window_single_click_subscribe(BUTTON_ID_SELECT, stewie_select_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, stewie_down_click_handler);
+  window_long_click_subscribe(BUTTON_ID_SELECT, 650, stewie_select_long_click_handler, NULL);
 }
 
 void stewie_action_bar_click_config_provider(void *context) {
@@ -271,4 +405,11 @@ void stewie_action_bar_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, stewie_up_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, stewie_select_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, stewie_down_click_handler);
+  window_long_click_subscribe(BUTTON_ID_SELECT, 650, stewie_select_long_click_handler, NULL);
+}
+
+void stewie_scroll_click_config_provider(void *context) {
+  // Let ScrollLayer handle UP/DOWN for scrolling; use SELECT to open the native action menu.
+  window_single_click_subscribe(BUTTON_ID_BACK, stewie_back_click_handler);
+  window_single_click_subscribe(BUTTON_ID_SELECT, stewie_select_click_handler);
 }

@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+*.o
+*.a
+build/
+node_modules/
+.playwright-mcp/
+htdocs/

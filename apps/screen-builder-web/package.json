@@ -1,0 +1,25 @@
+{
+  "name": "screen-builder-web",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@pebble/sdui-contract": "file:../../packages/sdui-contract",
+    "@tailwindcss/postcss": "^4.2.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.500.0",
+    "next": "^16.0.0",
+    "radix-ui": "^1.4.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "reactflow": "^11.11.2",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.1"
+  },
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "check-contract": "node scripts/check-contract.js"
+  }
+}

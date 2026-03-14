@@ -1,0 +1,517 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+/* --- Design tokens for Tailwind 4 --- */
+@theme {
+  /* App palette */
+  --color-panel: #121b2b;
+  --color-panel-soft: #18243a;
+  --color-line: #2d456d;
+  --color-ink: #eaf2ff;
+  --color-ink-dim: #9eb2d1;
+  --color-accent: #34c6a7;
+  --color-accent-2: #ff8a3d;
+  --color-danger: #ff6b6b;
+
+  /* shadcn-compatible semantic colors */
+  --color-background: #0b0f17;
+  --color-foreground: #eaf2ff;
+  --color-card: #121b2b;
+  --color-card-foreground: #eaf2ff;
+  --color-popover: #121b2b;
+  --color-popover-foreground: #eaf2ff;
+  --color-primary: #34c6a7;
+  --color-primary-foreground: #06221c;
+  --color-secondary: #ff8a3d;
+  --color-secondary-foreground: #1a0800;
+  --color-muted: #18243a;
+  --color-muted-foreground: #9eb2d1;
+  --color-accent-foreground: #eaf2ff;
+  --color-destructive: #ff6b6b;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #2d456d;
+  --color-input: #2d456d;
+  --color-ring: #34c6a7;
+
+  --font-sans: 'Space Grotesk', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --radius: 0.5rem;
+}
+
+/* --- shadcn CSS variable overrides (navy palette) --- */
+:root {
+  --bg-top: #0f1723;
+  --bg-bottom: #0b0f17;
+  --accent: #34c6a7;
+  --accent-2: #ff8a3d;
+  --danger: #ff6b6b;
+  --line: #2d456d;
+  --ink: #eaf2ff;
+  --ink-dim: #9eb2d1;
+  --radius: 0.5rem;
+
+  --background: #0b0f17;
+  --foreground: #eaf2ff;
+  --card: #121b2b;
+  --card-foreground: #eaf2ff;
+  --popover: #121b2b;
+  --popover-foreground: #eaf2ff;
+  --primary: #34c6a7;
+  --primary-foreground: #06221c;
+  --secondary: #ff8a3d;
+  --secondary-foreground: #1a0800;
+  --muted: #18243a;
+  --muted-foreground: #9eb2d1;
+  --accent-shadcn: #18243a;
+  --accent-foreground: #eaf2ff;
+  --destructive: #ff6b6b;
+  --destructive-foreground: #fff;
+  --border: #2d456d;
+  --input: #2d456d;
+  --ring: #34c6a7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: 'Space Grotesk', 'Avenir Next', 'Trebuchet MS', sans-serif;
+  background:
+    radial-gradient(circle at 88% 12%, rgba(255, 138, 61, 0.16), transparent 42%),
+    radial-gradient(circle at 14% 82%, rgba(52, 198, 167, 0.16), transparent 44%),
+    linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
+  color: var(--ink);
+}
+
+code {
+  font-family: 'IBM Plex Mono', 'Menlo', monospace;
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 0.08rem 0.35rem;
+}
+
+/* --- Graph nodes (used by ReactFlow custom nodes) --- */
+.node-card {
+  display: grid;
+  gap: 0.18rem;
+  padding-right: 18px;
+}
+
+.node-square {
+  width: 300px;
+  min-height: 240px;
+  max-width: 340px;
+}
+
+.node-card-shell {
+  position: relative;
+  padding: 4px;
+}
+
+.node-selected {
+  filter: drop-shadow(0 0 0.8rem rgba(52, 198, 167, 0.18));
+}
+
+.node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.node-type-icon {
+  opacity: 0.7;
+  margin-right: 0.2rem;
+}
+
+.node-id {
+  font-size: 0.75rem;
+  color: var(--ink-dim);
+}
+
+.node-entry {
+  border-left: 3px solid var(--accent);
+  padding-left: 6px;
+}
+
+.node-row-unwired {
+  background: rgba(255, 91, 91, 0.12);
+  border-color: rgba(255, 91, 91, 0.4);
+}
+
+.node-list {
+  margin-top: 0.35rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.35rem;
+  display: grid;
+  gap: 0.25rem;
+  padding-right: 8px;
+}
+
+.node-row {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding-right: 18px;
+}
+
+.node-row-drawer {
+  border-style: solid;
+  background: rgba(114, 228, 255, 0.08);
+}
+
+.node-inline-button {
+  width: 100%;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 0.32rem 0.45rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink-dim);
+  font-size: 0.74rem;
+  text-align: left;
+}
+
+.node-row strong {
+  font-size: 0.86rem;
+}
+
+.node-sub {
+  font-size: 0.75rem;
+  color: var(--ink-dim);
+}
+
+.node-sub-warning {
+  color: #ff9b9b;
+}
+
+.node-alert-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ff6464;
+  box-shadow: 0 0 0 3px rgba(255, 100, 100, 0.16);
+  flex: 0 0 auto;
+}
+
+.run-target-node {
+  min-width: 180px;
+  padding: 0.7rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 191, 105, 0.45);
+  background:
+    radial-gradient(circle at top left, rgba(255, 191, 105, 0.18), transparent 50%),
+    rgba(15, 20, 31, 0.95);
+  color: #ffe4c4;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+.run-target-badge {
+  display: inline-flex;
+  margin-bottom: 0.45rem;
+  padding: 0.18rem 0.42rem;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: rgba(255, 191, 105, 0.16);
+  border: 1px solid rgba(255, 191, 105, 0.35);
+  color: #ffd39a;
+}
+
+.run-target-sub {
+  margin-top: 0.22rem;
+  font-size: 0.76rem;
+  color: rgba(255, 228, 196, 0.78);
+}
+
+.edge-label {
+  position: absolute;
+  padding: 0.18rem 0.46rem;
+  border-radius: 999px;
+  background: rgba(11, 15, 23, 0.92);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 0.72rem;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+}
+
+.chip-row {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.chip.tiny {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  padding: 0.14rem 0.44rem;
+}
+
+.chip-accent {
+  background: rgba(52, 198, 167, 0.18);
+  border-color: rgba(52, 198, 167, 0.6);
+  color: #bff6e8;
+}
+
+/* --- Form fields (used in inspector and dialogs) --- */
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.field-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.col-span-2 {
+  grid-column: span 2;
+}
+
+.field-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.field-hint {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--ink-dim);
+  opacity: 0.7;
+  margin-bottom: 0.25rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.field-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(10, 14, 22, 0.65);
+  color: var(--ink);
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.field-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(52, 198, 167, 0.2);
+}
+
+.field-input.area {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.field-input.area.tall {
+  min-height: 200px;
+}
+
+/* --- List cards (used in inspector for items/actions) --- */
+.list-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem;
+  background: rgba(9, 14, 22, 0.72);
+  margin-bottom: 0.4rem;
+}
+
+.list-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.35rem;
+}
+
+/* --- Notice toast --- */
+.notice {
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  background: rgba(10, 15, 24, 0.65);
+}
+
+.notice.success {
+  color: #b7ffef;
+  border-color: rgba(52, 198, 167, 0.56);
+}
+
+.notice.error {
+  color: #ffd6d6;
+  border-color: rgba(255, 107, 107, 0.56);
+}
+
+/* --- Emulator (used by pebble-emulator.js) --- */
+.emulator-container {
+  width: 100%;
+}
+
+.emulator-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  gap: 0.5rem;
+}
+
+.emulator-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.68rem;
+  color: var(--ink-dim);
+}
+
+.emulator-meta {
+  margin-top: 0.2rem;
+  font-size: 0.6rem;
+  color: var(--ink-dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.emulator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+}
+
+.emulator-dot.loading,
+.emulator-dot.booting {
+  background: var(--accent-2);
+  animation: pulse 1s infinite;
+}
+
+.emulator-dot.ready {
+  background: var(--accent);
+}
+
+.emulator-dot.error {
+  background: var(--danger);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.emulator-status-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.emulator-watch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  outline: none;
+}
+
+.emulator-watch:focus-within .emu-btn {
+  border-color: var(--accent);
+}
+
+.emulator-display {
+  display: flex;
+  justify-content: center;
+}
+
+.emulator-iframe {
+  width: 200px;
+  height: 224px;
+  border: 2px solid #333;
+  border-radius: 10px;
+  background: #000;
+  overflow: hidden;
+}
+
+.emu-btn-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.emu-btn-left {
+  padding-right: 0.25rem;
+}
+
+.emu-btn-right {
+  padding-left: 0.25rem;
+}
+
+.emu-btn {
+  font-size: 0.7rem;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--ink-dim);
+  font-weight: 500;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.emu-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--ink);
+}
+
+/* --- Status bar --- */
+.status-bar {
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem;
+  font-size: 0.68rem;
+  color: var(--ink-dim);
+  border-top: 1px solid var(--line);
+  background: var(--bg-bottom);
+}

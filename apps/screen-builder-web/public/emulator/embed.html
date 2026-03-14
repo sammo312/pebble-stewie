@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Pebble Emulator (Embedded)</title>
+    <script src="coi-serviceworker.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: transparent; overflow: hidden; }
+        canvas#canvas {
+            image-rendering: pixelated;
+            display: block;
+            width: 200px;
+            height: 228px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="200" height="228"></canvas>
+
+    <script>
+        var ASSET_BASE = '';
+        var runtimeReady = false;
+        var parentOrigin = '*';
+        var booted = false;
+        var controlLogOffset = 0;
+        var controlLogTimer = 0;
+
+        function postToParent(data) {
+            try { window.parent.postMessage(data, parentOrigin); } catch(e) {}
+        }
+
+        function postButtonEvent(button, action) {
+            if (!button) return;
+            postToParent({ type: 'emulator-button', button: button, action: action || 'click' });
+        }
+
+        // QEMU Module configuration
+        var Module = {
+            canvas: document.getElementById('canvas'),
+            noInitialRun: false,
+            arguments: [
+                '-machine', 'pebble-snowy-emery-bb',
+                '-display', 'none',
+                '-monitor', 'none',
+                '-parallel', 'none',
+                '-kernel', '/firmware/qemu_micro_flash.bin',
+                '-drive', 'if=none,id=spi-flash,file=/firmware/qemu_spi_flash.bin,format=raw',
+                '-serial', 'null',
+                '-serial', 'file:/tmp/pebble_control.log',
+                '-serial', 'file:/tmp/pebble_serial.log',
+            ],
+            print: function(text) {
+                // console.log('[emu]', text);
+            },
+            printErr: function(text) {
+                // Filter noise
+                if (text.indexOf('unimp') >= 0 || text.indexOf('write 0x') >= 0 ||
+                    text.indexOf('read 0x') >= 0 || text.indexOf('DMA:') >= 0) return;
+            },
+            onRuntimeInitialized: function() {
+                runtimeReady = true;
+                startControlLogPump();
+                postToParent({ type: 'emulator-booting' });
+            },
+            locateFile: function(path) {
+                return ASSET_BASE + path;
+            },
+            preRun: [],
+        };
+
+        // Framebuffer rendering
+        var lastFrameCount = 0;
+        var totalFrames = 0;
+        var canvasCtx = document.getElementById('canvas').getContext('2d');
+        var cachedImgData = null;
+        var cachedWidth = 0;
+        var cachedHeight = 0;
+
+        function renderLoop() {
+            if (!runtimeReady) return;
+            try {
+                var frameCount = Module._pebble_display_frame_count();
+                if (frameCount === lastFrameCount) return;
+                lastFrameCount = frameCount;
+                totalFrames++;
+
+                var width = Module._pebble_display_width();
+                var height = Module._pebble_display_height();
+                var stride = Module._pebble_display_stride();
+                var dataPtr = Module._pebble_display_data();
+                if (!dataPtr || !width || !height) return;
+
+                if (totalFrames === 1) {
+                    postToParent({ type: 'emulator-status', text: 'Display active: ' + width + 'x' + height });
+                }
+
+                // Notify ready after first few frames
+                if (totalFrames === 3) {
+                    postToParent({ type: 'emulator-ready' });
+                }
+
+                if (!cachedImgData || cachedWidth !== width || cachedHeight !== height) {
+                    cachedImgData = canvasCtx.createImageData(width, height);
+                    cachedWidth = width;
+                    cachedHeight = height;
+                }
+
+                var dst32 = new Uint32Array(cachedImgData.data.buffer);
+                var heap = Module.HEAPU8;
+                for (var y = 0; y < height; y++) {
+                    var rowSrc = dataPtr + y * stride;
+                    var rowDst = y * width;
+                    for (var x = 0; x < width; x++) {
+                        var s = rowSrc + x * 4;
+                        dst32[rowDst + x] = heap[s+2] | (heap[s+1] << 8) | (heap[s] << 16) | 0xFF000000;
+                    }
+                }
+                canvasCtx.putImageData(cachedImgData, 0, 0);
+
+                postToParent({ type: 'emulator-frame' });
+            } catch(e) {}
+        }
+        setInterval(renderLoop, 32);
+
+        function stopControlLogPump() {
+            if (controlLogTimer) {
+                clearInterval(controlLogTimer);
+                controlLogTimer = 0;
+            }
+        }
+
+        function pumpControlLog() {
+            if (!runtimeReady || !window.FS) return;
+            try {
+                var bytes = FS.readFile('/tmp/pebble_control.log');
+                if (!(bytes instanceof Uint8Array)) {
+                    bytes = new Uint8Array(bytes || []);
+                }
+
+                if (bytes.length < controlLogOffset) {
+                    controlLogOffset = 0;
+                }
+
+                if (bytes.length === controlLogOffset) return;
+
+                var delta = bytes.slice(controlLogOffset);
+                controlLogOffset = bytes.length;
+                if (delta.length > 0) {
+                    postToParent({ type: 'emulator-control-bytes', data: Array.from(delta) });
+                }
+            } catch(e) {}
+        }
+
+        function startControlLogPump() {
+            stopControlLogPump();
+            controlLogOffset = 0;
+            controlLogTimer = setInterval(pumpControlLog, 100);
+        }
+
+        // Button input
+        var buttonState = 0;
+        var BUTTON_BACK   = 1 << 0;
+        var BUTTON_UP     = 1 << 1;
+        var BUTTON_SELECT = 1 << 2;
+        var BUTTON_DOWN   = 1 << 3;
+        var buttonStateAddr = 0;
+        var syntheticLongPress = {};
+        var btnMap = { back: BUTTON_BACK, up: BUTTON_UP, select: BUTTON_SELECT, down: BUTTON_DOWN };
+
+        function updateButtons(bit, pressed) {
+            if (pressed) buttonState |= bit;
+            else buttonState &= ~bit;
+            if (!runtimeReady) return;
+            if (buttonStateAddr) {
+                Atomics.store(Module.HEAPU32, buttonStateAddr, buttonState);
+            } else if (Module._pebble_button_state_addr) {
+                var addr = Module._pebble_button_state_addr();
+                if (addr) {
+                    buttonStateAddr = addr >> 2;
+                    Atomics.store(Module.HEAPU32, buttonStateAddr, buttonState);
+                }
+            }
+        }
+
+        // Keyboard input (when iframe is focused)
+        var keyMap = {
+            'ArrowLeft': { bit: BUTTON_BACK, button: 'back' },
+            'ArrowUp': { bit: BUTTON_UP, button: 'up' },
+            'ArrowRight': { bit: BUTTON_SELECT, button: 'select' },
+            'ArrowDown': { bit: BUTTON_DOWN, button: 'down' },
+            'Escape': { bit: BUTTON_BACK, button: 'back' },
+            'Enter': { bit: BUTTON_SELECT, button: 'select' },
+        };
+        document.addEventListener('keydown', function(e) {
+            var entry = keyMap[e.key];
+            if (entry !== undefined) {
+                e.preventDefault();
+                if (entry.button === 'select' && e.shiftKey && !e.repeat) {
+                    syntheticLongPress[entry.button] = true;
+                    updateButtons(entry.bit, true);
+                    setTimeout(function() {
+                        updateButtons(entry.bit, false);
+                        syntheticLongPress[entry.button] = false;
+                    }, 850);
+                    postButtonEvent(entry.button, 'long');
+                    return;
+                }
+                updateButtons(entry.bit, true);
+                if (!e.repeat) {
+                    postButtonEvent(entry.button, 'click');
+                }
+            }
+        });
+        document.addEventListener('keyup', function(e) {
+            var entry = keyMap[e.key];
+            if (entry !== undefined) {
+                e.preventDefault();
+                if (syntheticLongPress[entry.button]) {
+                    return;
+                }
+                updateButtons(entry.bit, false);
+            }
+        });
+
+        // Listen for messages from parent
+        window.addEventListener('message', function(event) {
+            var data = event.data;
+            if (!data || typeof data !== 'object') return;
+
+            if (data.type === 'boot' && !booted) {
+                booted = true;
+                bootEmulator();
+            }
+
+            if (data.type === 'button') {
+                var bit = btnMap[data.button];
+                if (bit !== undefined) {
+                    if (data.action === 'click') {
+                        updateButtons(bit, true);
+                        setTimeout(function() { updateButtons(bit, false); }, 200);
+                    } else if (data.action === 'long') {
+                        updateButtons(bit, true);
+                        setTimeout(function() { updateButtons(bit, false); }, 850);
+                    } else if (data.action === 'down') {
+                        updateButtons(bit, true);
+                    } else if (data.action === 'up') {
+                        updateButtons(bit, false);
+                    }
+                    postButtonEvent(data.button, data.action || 'click');
+                }
+            }
+
+            // Serial data injection via ring buffer (FEED/BEEF framed packets from parent)
+            if (data.type === 'inject' && data.data) {
+                if (!runtimeReady) {
+                    console.warn('[embed] inject received but runtime not ready');
+                    postToParent({ type: 'inject-error', text: 'Runtime not ready' });
+                    return;
+                }
+                try {
+                    var bytes = new Uint8Array(data.data);
+                    // Use the exported ring buffer instead of malloc
+                    var bufAddr = Module._pebble_serial_inject_buf_addr();
+                    var wpAddr = Module._pebble_serial_inject_write_pos_addr();
+                    var bufSize = Module._pebble_serial_inject_buf_size();
+                    var writePos = Module.HEAPU32[wpAddr >> 2];
+
+                    for (var i = 0; i < bytes.length; i++) {
+                        Module.HEAPU8[bufAddr + (writePos % bufSize)] = bytes[i];
+                        writePos++;
+                    }
+                    // Atomic store of new write position
+                    Atomics.store(Module.HEAPU32, wpAddr >> 2, writePos);
+                    console.log('[embed] Injected', bytes.length, 'bytes into ring buffer');
+                    postToParent({ type: 'inject-ok' });
+                } catch(e) {
+                    console.error('[embed] inject error:', e);
+                    postToParent({ type: 'inject-error', text: e.message });
+                }
+            }
+        });
+
+        async function fetchBinary(url, label) {
+            postToParent({ type: 'emulator-status', text: 'Downloading ' + label + '...' });
+            var resp = await fetch(url);
+            if (!resp.ok) throw new Error(label + ': HTTP ' + resp.status);
+            return new Uint8Array(await resp.arrayBuffer());
+        }
+
+        async function bootEmulator() {
+            try {
+                // Check SharedArrayBuffer support (required for Emscripten pthreads)
+                if (typeof SharedArrayBuffer === 'undefined') {
+                    postToParent({ type: 'emulator-error',
+                        text: 'SharedArrayBuffer not available. Page needs Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers.' });
+                    return;
+                }
+
+                var microData = await fetchBinary(ASSET_BASE + 'firmware/sdk/qemu_micro_flash.bin', 'micro flash');
+                postToParent({ type: 'emulator-status', text: 'Downloading SPI flash (16MB)...' });
+                var spiData = await fetchBinary(ASSET_BASE + 'firmware/sdk/qemu_spi_flash.bin', 'SPI flash');
+
+                Module.preRun.push(function() {
+                    try { FS.mkdir('/firmware'); } catch(e) {}
+                    try { FS.mkdir('/tmp'); } catch(e) {}
+                    try { FS.unlink('/tmp/pebble_control.log'); } catch(e) {}
+                    try { FS.unlink('/tmp/pebble_serial.log'); } catch(e) {}
+                    var offsetSec = -new Date().getTimezoneOffset() * 60;
+                    ENV.TZ_OFFSET_SEC = String(offsetSec);
+                    FS.writeFile('/firmware/qemu_micro_flash.bin', microData);
+                    FS.writeFile('/firmware/qemu_spi_flash.bin', spiData);
+                });
+
+                postToParent({ type: 'emulator-status', text: 'Loading QEMU WASM (36MB)...' });
+                var script = document.createElement('script');
+                script.src = ASSET_BASE + 'qemu-system-arm.js';
+                script.onerror = function() {
+                    postToParent({ type: 'emulator-error', text: 'Failed to load QEMU WASM JS' });
+                };
+                script.onload = function() {
+                    postToParent({ type: 'emulator-status', text: 'WASM loaded, initializing...' });
+                    // Set a timeout to detect if initialization hangs
+                    setTimeout(function() {
+                        if (!runtimeReady) {
+                            postToParent({ type: 'emulator-error',
+                                text: 'WASM initialization timed out. Check browser console for errors.' });
+                        }
+                    }, 30000);
+                };
+                document.body.appendChild(script);
+            } catch(e) {
+                postToParent({ type: 'emulator-error', text: e.message });
+            }
+        }
+    </script>
+</body>
+</html>

@@ -41,6 +41,8 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
       s_menu_item_count = 0;
     }
 
+    stewie_reset_menu_actions();
+
     if (body_tuple && body_tuple->type == TUPLE_CSTRING) {
       stewie_copy_with_limit(s_menu_body, sizeof(s_menu_body), body_tuple->value->cstring,
                              strlen(body_tuple->value->cstring));
@@ -51,7 +53,6 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
     stewie_reset_card_actions();
     s_selected_menu_row = 0;
     stewie_show_menu();
-    return;
   }
 
   if (ui_type == UI_TYPE_CARD) {
@@ -59,6 +60,7 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
     Tuple *body_tuple = dict_find(iter, MESSAGE_KEY_body);
     Tuple *actions_tuple = dict_find(iter, MESSAGE_KEY_actions);
 
+    stewie_reset_menu_actions();
     if (title_tuple && title_tuple->type == TUPLE_CSTRING) {
       stewie_copy_with_limit(s_card_title, sizeof(s_card_title), title_tuple->value->cstring,
                              strlen(title_tuple->value->cstring));
@@ -80,6 +82,53 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
     }
 
     stewie_show_card();
+  }
+
+  if (ui_type == UI_TYPE_SCROLL) {
+    Tuple *title_tuple = dict_find(iter, MESSAGE_KEY_title);
+    Tuple *body_tuple = dict_find(iter, MESSAGE_KEY_body);
+    Tuple *actions_tuple = dict_find(iter, MESSAGE_KEY_actions);
+
+    stewie_reset_menu_actions();
+    if (title_tuple && title_tuple->type == TUPLE_CSTRING) {
+      stewie_copy_with_limit(s_card_title, sizeof(s_card_title), title_tuple->value->cstring,
+                             strlen(title_tuple->value->cstring));
+    } else {
+      stewie_copy_with_limit(s_card_title, sizeof(s_card_title), "Scroll", 6);
+    }
+
+    if (body_tuple && body_tuple->type == TUPLE_CSTRING) {
+      stewie_copy_with_limit(s_scroll_body, sizeof(s_scroll_body), body_tuple->value->cstring,
+                             strlen(body_tuple->value->cstring));
+    } else {
+      s_scroll_body[0] = '\0';
+    }
+
+    stewie_reset_menu_actions();
+    if (actions_tuple && actions_tuple->type == TUPLE_CSTRING) {
+      stewie_parse_menu_actions(actions_tuple->value->cstring);
+    }
+
+    stewie_reset_card_actions();
+    stewie_show_scroll();
+  }
+
+  // Handle run effects
+  Tuple *vibe_tuple = dict_find(iter, MESSAGE_KEY_effectVibe);
+  if (vibe_tuple && vibe_tuple->type == TUPLE_CSTRING) {
+    const char *vibe = vibe_tuple->value->cstring;
+    if (strcmp(vibe, "short") == 0) {
+      vibes_short_pulse();
+    } else if (strcmp(vibe, "long") == 0) {
+      vibes_long_pulse();
+    } else if (strcmp(vibe, "double") == 0) {
+      vibes_double_pulse();
+    }
+  }
+
+  Tuple *light_tuple = dict_find(iter, MESSAGE_KEY_effectLight);
+  if (light_tuple) {
+    light_enable_interaction();
   }
 }
 
@@ -117,6 +166,13 @@ static void prv_window_load(Window *window) {
   text_layer_set_text(s_menu_body_layer, s_menu_body);
   layer_add_child(window_layer, text_layer_get_layer(s_menu_body_layer));
 
+  s_menu_action_hint_layer = layer_create(GRect(s_window_bounds.size.w - 14, s_window_bounds.size.h / 2, 14, 14));
+  if (s_menu_action_hint_layer) {
+    layer_set_update_proc(s_menu_action_hint_layer, stewie_menu_action_hint_update_proc);
+    layer_set_hidden(s_menu_action_hint_layer, true);
+    layer_add_child(window_layer, s_menu_action_hint_layer);
+  }
+
   s_action_bar_layer = action_bar_layer_create();
   if (s_action_bar_layer) {
     action_bar_layer_add_to_window(s_action_bar_layer, window);
@@ -145,6 +201,25 @@ static void prv_window_load(Window *window) {
   text_layer_set_text(s_card_body_layer, s_card_body);
   layer_add_child(window_layer, text_layer_get_layer(s_card_body_layer));
 
+  // ScrollLayer for long-form text
+  int16_t scroll_content_width = s_window_bounds.size.w - 12;
+  s_scroll_layer = scroll_layer_create(s_window_bounds);
+  scroll_layer_set_paging(s_scroll_layer, true);
+
+  s_scroll_body_layer = text_layer_create(GRect(6, 0, scroll_content_width, s_window_bounds.size.h));
+  text_layer_set_font(s_scroll_body_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
+  text_layer_set_text_alignment(s_scroll_body_layer, GTextAlignmentLeft);
+  text_layer_set_overflow_mode(s_scroll_body_layer, GTextOverflowModeWordWrap);
+  scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_scroll_body_layer));
+
+  layer_add_child(window_layer, scroll_layer_get_layer(s_scroll_layer));
+  layer_set_hidden(scroll_layer_get_layer(s_scroll_layer), true);
+
+  if (s_menu_action_hint_layer) {
+    layer_remove_from_parent(s_menu_action_hint_layer);
+    layer_add_child(window_layer, s_menu_action_hint_layer);
+  }
+
   stewie_reset_card_actions();
   stewie_show_card();
 }
@@ -162,6 +237,10 @@ static void prv_window_unload(Window *window) {
     text_layer_destroy(s_menu_body_layer);
     s_menu_body_layer = NULL;
   }
+  if (s_menu_action_hint_layer) {
+    layer_destroy(s_menu_action_hint_layer);
+    s_menu_action_hint_layer = NULL;
+  }
   if (s_card_title_layer) {
     text_layer_destroy(s_card_title_layer);
     s_card_title_layer = NULL;
@@ -169,6 +248,14 @@ static void prv_window_unload(Window *window) {
   if (s_card_body_layer) {
     text_layer_destroy(s_card_body_layer);
     s_card_body_layer = NULL;
+  }
+  if (s_scroll_body_layer) {
+    text_layer_destroy(s_scroll_body_layer);
+    s_scroll_body_layer = NULL;
+  }
+  if (s_scroll_layer) {
+    scroll_layer_destroy(s_scroll_layer);
+    s_scroll_layer = NULL;
   }
 
   if (s_icon_play) {
@@ -211,7 +298,7 @@ static void prv_init(void) {
   app_message_register_inbox_dropped(prv_inbox_dropped_handler);
   app_message_register_outbox_failed(prv_outbox_failed_handler);
 
-  const uint32_t inbox_size = 1024;
+  const uint32_t inbox_size = 2048;
   const uint32_t outbox_size = 256;
   AppMessageResult open_result = app_message_open(inbox_size, outbox_size);
   if (open_result != APP_MSG_OK) {

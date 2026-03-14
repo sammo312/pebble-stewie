@@ -16,5 +16,11 @@ Thumbs.db
 *~
 .env
 .env.*
+.pnpm-store/
+node_modules/
+.next/
+apps/*/node_modules/
+apps/*/.next/
+packages/*/node_modules/
 .lock-waf*
 internal-docs/

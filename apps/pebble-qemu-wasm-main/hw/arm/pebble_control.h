@@ -1,0 +1,21 @@
+#ifndef PEBBLE_CONTROL_H
+#define PEBBLE_CONTROL_H
+
+#include "qemu/typedefs.h"
+#include "hw/arm/stm32_common.h"
+
+typedef struct PebbleControl PebbleControl;
+
+/* Create pebble_control that sits between a Chardev and a Stm32Uart.
+ * chr: the chardev connected to the host (e.g. serial_hd(1))
+ * uart: the UART device in the emulated Pebble
+ */
+PebbleControl *pebble_control_create(Chardev *chr, Stm32Uart *uart);
+
+void pebble_control_send_vibe_notification(PebbleControl *s, bool on);
+
+#ifdef __EMSCRIPTEN__
+void pebble_control_init_wasm_inject(PebbleControl *s);
+#endif
+
+#endif /* PEBBLE_CONTROL_H */

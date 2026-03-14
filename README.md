@@ -1,9 +1,9 @@
-# pebble-stewie (SDUI + OpenAI Backend)
+# pebble-stewie (SDUI + Direct OpenAI)
 <img width="300" height="300" alt="kawaistew" src="https://github.com/user-attachments/assets/d1275c0d-d4bb-41a9-9bb0-7a1b7b026958" />
 
 
 Pebble app prototype where the watch is only a renderer.
-Phone PKJS handles state, calls a backend, and sends compact UI schema to the watch.
+Phone PKJS handles state, can call OpenAI directly, and sends compact UI schema to the watch.
 
 ## Loop
 
@@ -11,15 +11,33 @@ Phone PKJS handles state, calls a backend, and sends compact UI schema to the wa
 2. Watch renders it.
 3. User clicks or dictates.
 4. Watch sends action (`ready`, `select`, `back`, `voice`).
-5. Phone calls backend with user input + context.
-6. Backend returns next SDUI turn.
+5. Phone calls OpenAI with user input + context.
+6. OpenAI returns the next canonical screen graph.
 
 ## Architecture
 
 - Watch renderer: [src/c/pebble-stewie.c](/Users/sam/dev/pebble/pebble-stewie/src/c/pebble-stewie.c)
 - Phone brain: [src/pkjs/index.js](/Users/sam/dev/pebble/pebble-stewie/src/pkjs/index.js)
-- OpenAI backend: [backend/openai-sdui-server.mjs](/Users/sam/dev/pebble/pebble-stewie/backend/openai-sdui-server.mjs)
+- Optional local backend prototype: [backend/openai-sdui-server.mjs](/Users/sam/dev/pebble/pebble-stewie/backend/openai-sdui-server.mjs)
 - Message keys: [package.json](/Users/sam/dev/pebble/pebble-stewie/package.json)
+- Screen authoring guide: [SCREEN_SCHEMA_GUIDE.md](/Users/sam/dev/pebble/pebble-stewie/docs/SCREEN_SCHEMA_GUIDE.md)
+- SDUI import/export spec: [docs/SDUI_SCHEMA_SPEC.md](/Users/sam/dev/pebble/pebble-stewie/docs/SDUI_SCHEMA_SPEC.md)
+- UI support roadmap: [docs/UI_SUPPORT_PLAN.md](/Users/sam/dev/pebble/pebble-stewie/docs/UI_SUPPORT_PLAN.md)
+- Shared schema contract: [packages/sdui-contract](/Users/sam/dev/pebble/pebble-stewie/packages/sdui-contract)
+- Web builder scaffold: [apps/screen-builder-web](/Users/sam/dev/pebble/pebble-stewie/apps/screen-builder-web)
+
+## Monorepo Layout
+
+- `packages/sdui-contract`: canonical constants, normalizers, and builder element descriptors
+- `src/pkjs/*.js`: thin wrappers importing shared contract modules
+- `apps/screen-builder-web`: builder workspace that consumes the same contract package
+
+Builder quick run:
+
+```bash
+pnpm install
+pnpm --filter screen-builder-web dev
+```
 
 ## Message Protocol
 
@@ -40,51 +58,50 @@ Phone PKJS handles state, calls a backend, and sends compact UI schema to the wa
 - `actionIndex`: selected row index
 - `actionText`: transcript for voice action
 
-## Backend Contract
+## Direct OpenAI Contract
 
-`POST /turn` request:
+PKJS sends a `POST https://api.openai.com/v1/responses` request with your configured key:
 
 ```json
 {
   "schemaVersion": "pebble.sdui.v1",
-  "conversationId": "optional-thread-id",
-  "reason": "preset_prompt|menu_option|voice_transcript|...",
-  "input": "user input text",
-  "tzOffset": -360,
-  "watch": {
-    "platform": "basalt",
-    "supportsColour": true,
-    "screenWidth": 144,
-    "screenHeight": 168
-  }
+  "model": "gpt-4.1-mini",
+  "input": "...system prompt plus watch context and user input..."
 }
 ```
 
-Response:
+The runtime then extracts the first JSON object from the model response and normalizes it into the canonical Pebble graph schema.
+
+## Optional Local Backend
+
+An experimental local backend still exists in `backend/openai-sdui-server.mjs`, but the current PKJS runtime does not use `openai-backend-url` / `openai-backend-token`.
+
+If you want to bring the backend transport back, add an explicit transport switch rather than relying on stale settings keys.
+
+Example backend response shape:
 
 ```json
 {
   "conversationId": "thread-id",
-  "turn": {
+  "graph": {
     "schemaVersion": "pebble.sdui.v1",
-    "screen": {
-      "type": "card",
-      "title": "Question",
-      "body": "Choose one action",
-      "actions": [
-        { "slot": "select", "id": "confirm", "icon": "check", "label": "Confirm", "value": "confirm" }
-      ],
-      "options": []
-    },
-    "input": {
-      "mode": "menu_or_voice",
-      "expectResponse": true
+    "entryScreenId": "root",
+    "screens": {
+      "root": {
+        "id": "root",
+        "type": "card",
+        "title": "Question",
+        "body": "Choose one action",
+        "actions": [
+          { "slot": "select", "id": "confirm", "icon": "check", "label": "Confirm", "value": "confirm" }
+        ]
+      }
     }
   }
 }
 ```
 
-## Run Backend
+## Optional Backend Run
 
 ```bash
 # default key file used automatically: ~/.config/openai/key
@@ -120,11 +137,6 @@ export OPENAI_DEBUG_LOG=1
 export OPENAI_LOG_MAX_CHARS=2000   # optional truncation limit
 ```
 
-Then set in PKJS localStorage:
-
-- `openai-backend-url`: your backend URL, e.g. `http://192.168.12.10:8787/turn`
-- `openai-backend-token`: optional, must match `BACKEND_TOKEN`
-
 ## Build + Install
 
 ```bash
@@ -133,13 +145,20 @@ pebble build
 pebble install --phone <PHONE_IP> --logs
 ```
 
+## App Settings (Import + OpenAI Key)
+
+- Settings are in the Pebble/Rebble **phone app**, not on the watch UI.
+- Path: `My Pebble` -> `Watchapps` -> `pebble-stewie` -> `Settings`.
+- If `Settings` is missing, reinstall the app after this manifest change (`"capabilities": ["configurable"]` in `package.json`).
+
 ## Notes
 
-- Agent mode now depends only on your configured backend URL.
+- Agent mode uses the canonical graph schema + your OpenAI key/model from app settings.
 - Voice input still works through watch dictation (`actionType = 4`).
 
 ## Future Schema Strategy
 
-- The agent may return action-bar responses now via `screen.actions` on card turns.
-- Next step is expanding schema coverage so the agent can target more of Pebble UI primitives (beyond menu/card/action-bar) in a stable, versioned contract.
+- The runtime now supports schema-defined `run` actions for user-triggered effects and `bindings` for native/live values such as `device.time`.
+- Built-in screens, imported graphs, and agent responses now target the same graph schema.
+- Next step is expanding schema coverage to more Pebble UI primitives, including first-class input screens, in a stable, versioned contract.
 - Keep normalization strict in backend/PKJS so unsupported fields degrade safely instead of crashing render paths.

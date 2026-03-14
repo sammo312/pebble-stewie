@@ -1,0 +1,38 @@
+/* ReactFlow handle and node overrides — kept as plain CSS because these
+   require !important to override ReactFlow's inline styles. */
+
+.pebble-handle {
+  width: 10px !important;
+  height: 10px !important;
+  border: 1px solid var(--accent) !important;
+  background: rgba(52, 198, 167, 0.8) !important;
+  border-radius: 4px !important;
+}
+
+.target-handle {
+  background: rgba(255, 255, 255, 0.6) !important;
+  border-color: var(--line) !important;
+}
+
+.react-flow__handle-right.pebble-handle {
+  right: -10px;
+}
+
+.row-handle {
+  right: -14px;
+  top: 50% !important;
+  transform: translateY(-50%);
+}
+
+.react-flow__edge {
+  cursor: pointer;
+}
+
+.react-flow__controls {
+  background: rgba(9, 14, 22, 0.82) !important;
+  border: 1px solid var(--line) !important;
+}
+
+.react-flow__minimap-mask {
+  fill: rgba(10, 15, 24, 0.55);
+}

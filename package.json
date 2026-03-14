@@ -1,16 +1,22 @@
 {
   "name": "pebble-stewie",
   "author": "MakeAwesomeHappen",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "keywords": ["pebble-app"],
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "backend": "node backend/openai-sdui-server.mjs"
+    "backend": "node backend/openai-sdui-server.mjs",
+    "check:contract": "node apps/screen-builder-web/scripts/check-contract.js"
   },
   "dependencies": {},
   "pebble": {
     "displayName": "pebble-stewie",
     "uuid": "534cc93b-62cb-4cdf-b711-58fff6a0be41",
+    "versionLabel": "1.1",
     "sdkVersion": "3",
     "enableMultiJS": true,
     "targetPlatforms": [
@@ -25,6 +31,9 @@
     "watchapp": {
       "watchface": false
     },
+    "capabilities": [
+      "configurable"
+    ],
     "messageKeys": [
       "msgType",
       "uiType",
@@ -37,7 +46,9 @@
       "actionScreenId",
       "actionItemId",
       "actionIndex",
-      "actionText"
+      "actionText",
+      "effectVibe",
+      "effectLight"
     ],
     "resources": {
       "media": [
