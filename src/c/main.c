@@ -146,7 +146,6 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
     Tuple *title_tuple = dict_find(iter, MESSAGE_KEY_title);
     Tuple *body_tuple = dict_find(iter, MESSAGE_KEY_body);
     Tuple *drawing_tuple = dict_find(iter, MESSAGE_KEY_drawing);
-    char drawing_buffer[768];
 
     stewie_reset_menu_actions();
     stewie_reset_card_actions();
@@ -164,8 +163,9 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
     }
 
     if (drawing_tuple && drawing_tuple->type == TUPLE_CSTRING) {
-      size_t drawing_len = prv_copy_tuple_text(drawing_buffer, sizeof(drawing_buffer), drawing_tuple, iter);
-      stewie_parse_drawing(drawing_buffer, drawing_len);
+      size_t drawing_len =
+          prv_copy_tuple_text(s_draw_payload_buffer, sizeof(s_draw_payload_buffer), drawing_tuple, iter);
+      stewie_parse_drawing(s_draw_payload_buffer, drawing_len);
     } else {
       stewie_reset_draw();
     }

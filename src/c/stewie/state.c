@@ -30,6 +30,7 @@ CardAction s_card_actions[MAX_CARD_ACTIONS];
 uint16_t s_card_action_count = 0;
 DrawStep s_draw_steps[MAX_DRAW_STEPS];
 uint8_t s_draw_step_count = 0;
+char s_draw_payload_buffer[MAX_DRAW_PAYLOAD_LEN];
 
 char s_menu_title[MAX_TITLE_LEN] = "Menu";
 char s_menu_body[MAX_BODY_LEN] = "";

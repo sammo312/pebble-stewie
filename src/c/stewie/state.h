@@ -10,6 +10,7 @@
 #define MAX_MENU_ITEMS 8
 #define MAX_MENU_ACTIONS 6
 #define MAX_DRAW_STEPS 6
+#define MAX_DRAW_PAYLOAD_LEN 768
 #define MAX_ITEM_ID_LEN 24
 #define MAX_ITEM_LABEL_LEN 32
 #define MAX_CARD_ACTIONS NUM_ACTION_BAR_ITEMS
@@ -139,6 +140,7 @@ extern CardAction s_card_actions[MAX_CARD_ACTIONS];
 extern uint16_t s_card_action_count;
 extern DrawStep s_draw_steps[MAX_DRAW_STEPS];
 extern uint8_t s_draw_step_count;
+extern char s_draw_payload_buffer[MAX_DRAW_PAYLOAD_LEN];
 
 extern char s_menu_title[MAX_TITLE_LEN];
 extern char s_menu_body[MAX_BODY_LEN];

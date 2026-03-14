@@ -7,6 +7,8 @@
 #define DRAW_TOKEN_SIZE 32
 #define DRAW_TICK_MS 33
 
+static char s_draw_tokens[DRAW_TOKEN_COUNT][DRAW_TOKEN_SIZE];
+
 static int16_t prv_clamp_int16(int32_t value, int16_t min, int16_t max) {
   if (value < min) {
     return min;
@@ -41,24 +43,71 @@ static int32_t prv_parse_int(const char *token, int32_t fallback) {
   if (!token || token[0] == '\0') {
     return fallback;
   }
-  return (int32_t)strtol(token, NULL, 10);
+
+  int32_t sign = 1;
+  size_t index = 0;
+  int32_t value = 0;
+  bool has_digit = false;
+
+  if (token[index] == '-') {
+    sign = -1;
+    index++;
+  }
+
+  while (token[index] != '\0') {
+    char ch = token[index];
+    if (ch < '0' || ch > '9') {
+      return fallback;
+    }
+    has_digit = true;
+    value = (value * 10) + (int32_t)(ch - '0');
+    index++;
+  }
+
+  return has_digit ? (value * sign) : fallback;
+}
+
+static bool prv_token_equals(const char *token, const char *expected) {
+  if (!token || !expected) {
+    return false;
+  }
+
+  size_t index = 0;
+  while (token[index] != '\0' && expected[index] != '\0') {
+    if (token[index] != expected[index]) {
+      return false;
+    }
+    index++;
+  }
+
+  return token[index] == '\0' && expected[index] == '\0';
+}
+
+static size_t prv_token_length(const char *token) {
+  size_t length = 0;
+  if (!token) {
+    return 0;
+  }
+
+  while (length < DRAW_TOKEN_SIZE && token[length] != '\0') {
+    length++;
+  }
+  return length;
 }
 
 static uint8_t prv_tokenize_line(const char *line, size_t line_len,
                                  char tokens[DRAW_TOKEN_COUNT][DRAW_TOKEN_SIZE]) {
   uint8_t count = 0;
-  const char *cursor = line;
-  const char *line_end = line + line_len;
+  size_t token_start = 0;
 
-  while (cursor <= line_end && count < DRAW_TOKEN_COUNT) {
-    const char *separator = memchr(cursor, '|', (size_t)(line_end - cursor));
-    const char *token_end = separator ? separator : line_end;
-    stewie_copy_with_limit(tokens[count], DRAW_TOKEN_SIZE, cursor, (size_t)(token_end - cursor));
-    count++;
-    if (!separator) {
-      break;
+  for (size_t index = 0; index <= line_len && count < DRAW_TOKEN_COUNT; index++) {
+    if (index < line_len && line[index] != '|') {
+      continue;
     }
-    cursor = separator + 1;
+
+    stewie_copy_with_limit(tokens[count], DRAW_TOKEN_SIZE, line + token_start, index - token_start);
+    count++;
+    token_start = index + 1;
   }
 
   return count;
@@ -266,7 +315,7 @@ void stewie_reset_draw(void) {
 }
 
 static void prv_parse_config_line(char tokens[DRAW_TOKEN_COUNT][DRAW_TOKEN_SIZE], uint8_t token_count) {
-  if (token_count < 4 || strcmp(tokens[0], "cfg") != 0) {
+  if (token_count < 4 || !prv_token_equals(tokens[0], "cfg")) {
     return;
   }
 
@@ -277,17 +326,17 @@ static void prv_parse_config_line(char tokens[DRAW_TOKEN_COUNT][DRAW_TOKEN_SIZE]
 }
 
 static void prv_parse_step_line(char tokens[DRAW_TOKEN_COUNT][DRAW_TOKEN_SIZE], uint8_t token_count) {
-  if (token_count < 18 || strcmp(tokens[0], "s") != 0 || s_draw_step_count >= MAX_DRAW_STEPS) {
+  if (token_count < 18 || !prv_token_equals(tokens[0], "s") || s_draw_step_count >= MAX_DRAW_STEPS) {
     return;
   }
 
   DrawStep *step = &s_draw_steps[s_draw_step_count];
   memset(step, 0, sizeof(DrawStep));
 
-  stewie_copy_with_limit(step->id, sizeof(step->id), tokens[1], strlen(tokens[1]));
-  stewie_copy_with_limit(step->label, sizeof(step->label), tokens[17], strlen(tokens[17]));
+  stewie_copy_with_limit(step->id, sizeof(step->id), tokens[1], prv_token_length(tokens[1]));
+  stewie_copy_with_limit(step->label, sizeof(step->label), tokens[17], prv_token_length(tokens[17]));
   if (step->label[0] == '\0') {
-    stewie_copy_with_limit(step->label, sizeof(step->label), step->id, strlen(step->id));
+    stewie_copy_with_limit(step->label, sizeof(step->label), step->id, prv_token_length(step->id));
   }
 
   step->kind = prv_parse_step_kind(tokens[2]);
@@ -331,20 +380,19 @@ void stewie_parse_drawing(const char *encoded_drawing, size_t encoded_drawing_le
   const char *cursor = encoded_drawing;
   const char *drawing_end = encoded_drawing + encoded_drawing_len;
   while (cursor < drawing_end) {
-    const char *line_end = memchr(cursor, '\n', (size_t)(drawing_end - cursor));
-    if (!line_end) {
-      line_end = drawing_end;
+    const char *line_end = cursor;
+    while (line_end < drawing_end && *line_end != '\n') {
+      line_end++;
     }
 
     size_t line_len = (size_t)(line_end - cursor);
     if (line_len > 0) {
-      char tokens[DRAW_TOKEN_COUNT][DRAW_TOKEN_SIZE];
-      memset(tokens, 0, sizeof(tokens));
-      uint8_t token_count = prv_tokenize_line(cursor, line_len, tokens);
-      if (token_count > 0 && strcmp(tokens[0], "cfg") == 0) {
-        prv_parse_config_line(tokens, token_count);
-      } else if (token_count > 0 && strcmp(tokens[0], "s") == 0) {
-        prv_parse_step_line(tokens, token_count);
+      memset(s_draw_tokens, 0, sizeof(s_draw_tokens));
+      uint8_t token_count = prv_tokenize_line(cursor, line_len, s_draw_tokens);
+      if (token_count > 0 && strcmp(s_draw_tokens[0], "cfg") == 0) {
+        prv_parse_config_line(s_draw_tokens, token_count);
+      } else if (token_count > 0 && strcmp(s_draw_tokens[0], "s") == 0) {
+        prv_parse_step_line(s_draw_tokens, token_count);
       }
     }
 

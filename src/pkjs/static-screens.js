@@ -4,7 +4,7 @@ var constants = require('./constants');
 
 module.exports = {
   schemaVersion: 'pebble.sdui.v1',
-  entryScreenId: 'draw-demo',
+  entryScreenId: 'root',
   screens: {
     root: {
       id: 'root',
