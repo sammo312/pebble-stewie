@@ -19,6 +19,7 @@ export default function Page() {
         edges={editor.edges}
         unmappedCount={editor.unmappedCount}
         canExport={editor.canExport}
+        hasBuilderOnlyDrawScreens={editor.hasBuilderOnlyDrawScreens}
         newNodeType={editor.newNodeType}
         setNewNodeType={editor.setNewNodeType}
         newRunTargetId={editor.newRunTargetId}
@@ -79,6 +80,10 @@ export default function Page() {
                 addScreenAction={editor.addScreenAction}
                 removeScreenAction={editor.removeScreenAction}
                 updateScreenAction={editor.updateScreenAction}
+                updateDrawField={editor.updateDrawField}
+                addDrawStep={editor.addDrawStep}
+                removeDrawStep={editor.removeDrawStep}
+                updateDrawStep={editor.updateDrawStep}
                 getBindingsDraft={editor.getBindingsDraft}
                 updateBindingsDraft={editor.updateBindingsDraft}
                 commitBindingsDraft={editor.commitBindingsDraft}

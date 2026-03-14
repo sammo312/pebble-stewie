@@ -48,7 +48,8 @@
       "actionIndex",
       "actionText",
       "effectVibe",
-      "effectLight"
+      "effectLight",
+      "drawing"
     ],
     "resources": {
       "media": [

@@ -3,19 +3,23 @@ import {
   SCREEN_TYPE_ICONS,
   screenUsesButtonSlots,
   screenUsesSelectDrawer,
+  screenUsesDrawingCanvas,
   getScreenActions
 } from '@/app/lib/constants'
 import { isEntityWired, describeRunTarget } from '@/app/lib/graph-utils'
+import { describeDrawScreen } from '@/app/lib/draw-utils'
 
 export default function PebbleNode({ data, selected, id }) {
   const tags = data.tags || []
   const screen = data.screen || {}
   const isMenu = screen.type === 'menu'
   const usesDrawer = screenUsesSelectDrawer(screen)
+  const usesDrawing = screenUsesDrawingCanvas(screen)
   const actions = getScreenActions(screen)
   const hasActionList = actions.length > 0
   const isEntry = tags.includes('entry')
   const typeIcon = SCREEN_TYPE_ICONS[screen.type] || ''
+  const drawSummary = usesDrawing ? describeDrawScreen(screen) : null
   return (
     <div className={`node-card-shell ${selected ? 'node-selected' : ''}`}>
       <Handle type="target" id="target" position={Position.Left} className="pebble-handle target-handle" style={{ top: '50%' }} title="Incoming connection" />
@@ -84,6 +88,29 @@ export default function PebbleNode({ data, selected, id }) {
             >
               + Add Action Menu Item
             </button>
+          </div>
+        )}
+
+        {usesDrawing && (
+          <div className="node-list">
+            <div className="node-row node-row-drawer">
+              <div>
+                <strong>Motion Canvas</strong>
+                <div className="node-sub">
+                  {drawSummary.stepCount} step{drawSummary.stepCount === 1 ? '' : 's'} · {drawSummary.playMode} · {drawSummary.cycleMs}ms
+                </div>
+              </div>
+            </div>
+            {(screen.drawing?.steps || []).map((step, idx) => (
+              <div className="node-row" key={`${step.id || 'step'}-${idx}`}>
+                <div>
+                  <strong>{step.label || step.id || `step ${idx + 1}`}</strong>
+                  <div className="node-sub">
+                    {step.kind} · {step.x},{step.y} → {step.toX},{step.toY}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

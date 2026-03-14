@@ -9,12 +9,14 @@ var staticScreens = require('./static-screens');
 var textUtils = require('./text-utils');
 var screenActions = require('./screen-actions');
 var graphSchema = require('./graph-schema');
+var drawCodec = require('./draw-codec');
 
 var MSG_TYPE_RENDER = constants.MSG_TYPE_RENDER;
 var MSG_TYPE_ACTION = constants.MSG_TYPE_ACTION;
 var UI_TYPE_MENU = constants.UI_TYPE_MENU;
 var UI_TYPE_CARD = constants.UI_TYPE_CARD;
 var UI_TYPE_SCROLL = constants.UI_TYPE_SCROLL;
+var UI_TYPE_DRAW = constants.UI_TYPE_DRAW;
 var ACTION_TYPE_READY = constants.ACTION_TYPE_READY;
 var ACTION_TYPE_SELECT = constants.ACTION_TYPE_SELECT;
 var ACTION_TYPE_BACK = constants.ACTION_TYPE_BACK;
@@ -42,6 +44,7 @@ var encodeActions = screenActions.encodeActions;
 var encodeMenuActions = screenActions.encodeMenuActions;
 var buildActionLookup = screenActions.buildActionLookup;
 var encodeItems = screenActions.encodeItems;
+var encodeDrawingPayload = drawCodec.encodeDrawingPayload;
 
 var normalizeCanonicalGraph = graphSchema.normalizeCanonicalGraph;
 
@@ -81,7 +84,7 @@ var OPENAI_SYSTEM_PROMPT = [
   '  "screens": {',
   '    "root": {',
   '      "id": "root",',
-  '      "type": "menu" | "card" | "scroll",',
+  '      "type": "menu" | "card" | "scroll" | "draw",',
   '      "title": "short title",',
   '      "body": "short body",',
   '      "bodyTemplate": "optional {{binding.path}}",',
@@ -114,6 +117,7 @@ var OPENAI_SYSTEM_PROMPT = [
   '- use run for effects, not next/agentPrompt/agentCommand',
   '- run can include optional vibe (short/long/double) and light (true) for effects',
   '- use scroll type for long text content that needs vertical scrolling',
+  '- draw screens require a drawing object with playMode, background, timelineMs, and 1-6 steps',
   '- return valid JSON only'
 ].join('\n');
 
@@ -398,10 +402,11 @@ function sendRender(screen) {
 
   var isMenu = screen.type === 'menu';
   var isScroll = screen.type === 'scroll';
+  var isDraw = screen.type === 'draw';
   var isCard = screen.type === 'card';
   var normalizedMenuActions = isScroll ? normalizeMenuActions(screen.actions || []) : [];
   var normalizedActions = isCard ? normalizeScreenActions(screen.actions || []) : [];
-  var uiType = isMenu ? UI_TYPE_MENU : (isScroll ? UI_TYPE_SCROLL : UI_TYPE_CARD);
+  var uiType = isMenu ? UI_TYPE_MENU : (isScroll ? UI_TYPE_SCROLL : (isDraw ? UI_TYPE_DRAW : UI_TYPE_CARD));
   var payload = {
     msgType: MSG_TYPE_RENDER,
     uiType: uiType,
@@ -413,6 +418,13 @@ function sendRender(screen) {
     payload.items = encodeItems(screen.items);
     payload.actions = '';
     payload.body = screen.body ? String(screen.body) : '';
+    state.currentRenderedScreen = screen;
+    state.currentCardActionsById = {};
+    state.currentMenuActionsById = {};
+  } else if (isDraw) {
+    payload.body = screen.body ? limitText(screen.body, MAX_BODY_LEN) : '';
+    payload.actions = '';
+    payload.drawing = encodeDrawingPayload(screen.drawing);
     state.currentRenderedScreen = screen;
     state.currentCardActionsById = {};
     state.currentMenuActionsById = {};

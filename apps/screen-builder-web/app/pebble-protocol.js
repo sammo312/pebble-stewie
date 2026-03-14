@@ -1,3 +1,5 @@
+import * as sduiContractModule from '@pebble/sdui-contract'
+
 /**
  * Pebble Protocol implementation for WASM QEMU serial injection.
  *
@@ -11,6 +13,10 @@
  * The dictionary tuples match stewie's MESSAGE_KEY_* integers
  * (auto-generated from package.json messageKeys starting at 10000).
  */
+
+const contract = sduiContractModule.default || sduiContractModule
+const { drawCodec } = contract
+const { encodeDrawingPayload } = drawCodec
 
 // Stewie app UUID: 534cc93b-62cb-4cdf-b711-58fff6a0be41
 const STEWIE_UUID = new Uint8Array([
@@ -49,7 +55,8 @@ const MESSAGE_KEYS = {
   actionIndex: 10010,
   actionText: 10011,
   effectVibe: 10012,
-  effectLight: 10013
+  effectLight: 10013,
+  drawing: 10014
 }
 
 // SDUI constants (must match src/pkjs/constants.js)
@@ -58,6 +65,7 @@ const MSG_TYPE_ACTION = 2
 const UI_TYPE_MENU = 1
 const UI_TYPE_CARD = 2
 const UI_TYPE_SCROLL = 3
+const UI_TYPE_DRAW = 4
 const ACTION_TYPE_READY = 1
 const ACTION_TYPE_SELECT = 2
 const ACTION_TYPE_BACK = 3
@@ -476,7 +484,8 @@ export function buildScreenRenderPacket(screen) {
 
   const isMenu = screen.type === 'menu'
   const isScroll = screen.type === 'scroll'
-  const uiType = isMenu ? UI_TYPE_MENU : isScroll ? UI_TYPE_SCROLL : UI_TYPE_CARD
+  const isDraw = screen.type === 'draw'
+  const uiType = isMenu ? UI_TYPE_MENU : isScroll ? UI_TYPE_SCROLL : isDraw ? UI_TYPE_DRAW : UI_TYPE_CARD
 
   const dict = {
     msgType: MSG_TYPE_RENDER,
@@ -489,6 +498,10 @@ export function buildScreenRenderPacket(screen) {
     dict.items = encodeItems(screen.items)
     dict.actions = ''
     dict.body = screen.body ? String(screen.body) : ''
+  } else if (isDraw) {
+    dict.body = screen.body ? String(screen.body).slice(0, 180) : ''
+    dict.actions = ''
+    dict.drawing = encodeDrawingPayload(screen.drawing)
   } else {
     dict.body = screen.body ? String(screen.body).slice(0, isScroll ? 1024 : 180) : ''
     dict.actions = isScroll ? encodeMenuActions(screen.actions) : encodeActions(screen.actions)

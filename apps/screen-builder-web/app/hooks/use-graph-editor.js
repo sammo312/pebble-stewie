@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { applyNodeChanges, useNodesState, useEdgesState } from 'reactflow'
 import { ACTION_TYPES } from '../pebble-protocol'
 import {
-  constants,
   builderElements,
   graphSchema,
   bindingPresets,
@@ -17,6 +16,14 @@ import {
   getScreenActions,
   createDefaultGraph
 } from '../lib/constants'
+import {
+  clampDrawStepCount,
+  coerceDrawNumber,
+  createDefaultDrawing,
+  createDefaultDrawStep,
+  getDrawStepFieldLimit,
+  isDrawStepNumericField
+} from '../lib/draw-utils'
 import {
   ensureUniqueScreenId,
   ensureUniqueEntityId,
@@ -82,6 +89,7 @@ export default function useGraphEditor() {
     [selectedScreenType]
   )
   const screenIds = Object.keys(graph.screens)
+  const hasBuilderOnlyDrawScreens = false
   const unmappedCount = useMemo(() => countUnmappedEntities(graph), [graph])
   const requiredRunTargetIds = useMemo(() => collectRequiredRunTargetIds(graph), [graph])
   const activeRunTargetIds = useMemo(
@@ -901,7 +909,7 @@ export default function useGraphEditor() {
 
     if (field.id === 'type') {
       const val = String(rawValue || 'menu').toLowerCase()
-      const nextType = val === 'card' ? 'card' : val === 'scroll' ? 'scroll' : 'menu'
+      const nextType = val === 'card' ? 'card' : val === 'scroll' ? 'scroll' : val === 'draw' ? 'draw' : 'menu'
       updateSelectedScreen((screen) => {
         const next = {
           ...screen,
@@ -918,9 +926,13 @@ export default function useGraphEditor() {
         } else if (nextType === 'card') {
           next.actions = getScreenActions(screen)
           delete next.items
-        } else {
+        } else if (nextType === 'scroll') {
           next.actions = getScreenActions(screen)
           delete next.items
+        } else {
+          delete next.items
+          delete next.actions
+          next.drawing = screen.drawing || createDefaultDrawing()
         }
 
         return next
@@ -1003,8 +1015,8 @@ export default function useGraphEditor() {
   }
 
   function addScreen(kind) {
-    const requestedType = kind === 'card' ? 'card' : kind === 'scroll' ? 'scroll' : 'menu'
-    const titles = { menu: 'New Menu', card: 'New Card', scroll: 'New Scroll' }
+    const requestedType = kind === 'card' ? 'card' : kind === 'scroll' ? 'scroll' : kind === 'draw' ? 'draw' : 'menu'
+    const titles = { menu: 'New Menu', card: 'New Card', scroll: 'New Scroll', draw: 'New Motion' }
     const nextId = ensureUniqueScreenId(graph, 'screen', '')
     const nextScreen = {
       id: nextId,
@@ -1016,7 +1028,8 @@ export default function useGraphEditor() {
       bindings: null,
       input: { mode: 'menu' },
       items: requestedType === 'menu' ? [] : undefined,
-      actions: requestedType === 'scroll' || requestedType === 'card' ? [] : undefined
+      actions: requestedType === 'scroll' || requestedType === 'card' ? [] : undefined,
+      drawing: requestedType === 'draw' ? createDefaultDrawing() : undefined
     }
 
     setGraph((prev) => ({
@@ -1032,7 +1045,12 @@ export default function useGraphEditor() {
     setPreviewPlaceholderScreen(null)
     setPreviewScreenId(nextId)
     setPreviewHistory([])
-    setNotice({ type: 'success', text: `Added ${requestedType} ${nextId}` })
+    setNotice({
+      type: 'success',
+      text: requestedType === 'draw'
+        ? `Added draw screen ${nextId}`
+        : `Added ${requestedType} ${nextId}`
+    })
   }
 
   function deleteSelectedScreen() {
@@ -1179,6 +1197,87 @@ export default function useGraphEditor() {
     })
   }
 
+  function updateDrawField(fieldId, rawValue) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const drawing = { ...(screen.drawing || createDefaultDrawing()) }
+      if (fieldId === 'timelineMs') {
+        drawing.timelineMs = coerceDrawNumber(rawValue, drawing.timelineMs || 1800, 240, 20000)
+      } else if (fieldId === 'playMode' || fieldId === 'background') {
+        drawing[fieldId] = String(rawValue || '').toLowerCase()
+      }
+      return { ...screen, drawing }
+    })
+  }
+
+  function addDrawStep() {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    const steps = Array.isArray(selectedScreen.drawing?.steps) ? selectedScreen.drawing.steps : []
+    if (steps.length >= graphBuilderSpec.limits.maxDrawSteps) {
+      setNotice({ type: 'error', text: 'Maximum motion steps reached' })
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const drawing = { ...(screen.drawing || createDefaultDrawing()) }
+      const nextSteps = Array.isArray(drawing.steps) ? drawing.steps.slice() : []
+      nextSteps.push(createDefaultDrawStep(nextSteps))
+      drawing.steps = clampDrawStepCount(nextSteps)
+      return { ...screen, drawing }
+    })
+  }
+
+  function removeDrawStep(index) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const drawing = { ...(screen.drawing || createDefaultDrawing()) }
+      const nextSteps = Array.isArray(drawing.steps) ? drawing.steps.slice() : []
+      nextSteps.splice(index, 1)
+      drawing.steps = nextSteps
+      return { ...screen, drawing }
+    })
+  }
+
+  function updateDrawStep(index, fieldId, rawValue) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const drawing = { ...(screen.drawing || createDefaultDrawing()) }
+      const steps = Array.isArray(drawing.steps) ? drawing.steps.slice() : []
+      const current = steps[index] || createDefaultDrawStep(steps)
+      const next = { ...current }
+
+      if (fieldId === 'fill') {
+        next.fill = !!rawValue
+      } else if (fieldId === 'kind' || fieldId === 'color') {
+        next[fieldId] = String(rawValue || '').toLowerCase()
+      } else if (fieldId === 'id') {
+        const siblingSteps = steps.filter((_, stepIndex) => stepIndex !== index)
+        next.id = ensureUniqueEntityId(siblingSteps, rawValue, `step_${index + 1}`)
+      } else if (isDrawStepNumericField(fieldId)) {
+        const { min, max } = getDrawStepFieldLimit(fieldId)
+        next[fieldId] = coerceDrawNumber(rawValue, current[fieldId], min, max)
+      } else {
+        next[fieldId] = String(rawValue || '')
+      }
+
+      steps[index] = next
+      drawing.steps = clampDrawStepCount(steps)
+      return { ...screen, drawing }
+    })
+  }
+
   function handleImport() {
     let parsed
     try {
@@ -1278,6 +1377,7 @@ export default function useGraphEditor() {
     selectedNodeUsages,
     normalizedExportText,
     canExport,
+    hasBuilderOnlyDrawScreens,
     graphBuilderSpec,
     screenBuilderSpec,
 
@@ -1305,6 +1405,10 @@ export default function useGraphEditor() {
     addScreenAction,
     removeScreenAction,
     updateScreenAction,
+    updateDrawField,
+    addDrawStep,
+    removeDrawStep,
+    updateDrawStep,
     handleImport,
     handleCopyExport,
     handleDownloadExport,

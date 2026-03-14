@@ -59,6 +59,7 @@ void stewie_show_menu(void) {
     return;
   }
 
+  stewie_stop_draw_animation();
   // Restore window click config if coming from scroll mode
   window_set_click_config_provider(s_window, stewie_window_click_config_provider);
   s_current_ui_type = UI_TYPE_MENU;
@@ -73,6 +74,9 @@ void stewie_show_menu(void) {
   layer_set_hidden(text_layer_get_layer(s_card_body_layer), true);
   if (s_scroll_layer) {
     layer_set_hidden(scroll_layer_get_layer(s_scroll_layer), true);
+  }
+  if (s_draw_layer) {
+    layer_set_hidden(s_draw_layer, true);
   }
   if (s_action_bar_layer) {
     layer_set_hidden(action_bar_layer_get_layer(s_action_bar_layer), true);
@@ -91,6 +95,7 @@ void stewie_show_card(void) {
     return;
   }
 
+  stewie_stop_draw_animation();
   // Restore window click config if coming from scroll mode
   window_set_click_config_provider(s_window, stewie_window_click_config_provider);
   s_current_ui_type = UI_TYPE_CARD;
@@ -103,6 +108,9 @@ void stewie_show_card(void) {
   layer_set_hidden(text_layer_get_layer(s_card_body_layer), false);
   if (s_scroll_layer) {
     layer_set_hidden(scroll_layer_get_layer(s_scroll_layer), true);
+  }
+  if (s_draw_layer) {
+    layer_set_hidden(s_draw_layer, true);
   }
   if (s_action_bar_layer) {
     stewie_apply_card_actions();
@@ -118,6 +126,7 @@ void stewie_show_scroll(void) {
     return;
   }
 
+  stewie_stop_draw_animation();
   s_current_ui_type = UI_TYPE_SCROLL;
 
   // Hide other layers
@@ -132,6 +141,9 @@ void stewie_show_scroll(void) {
   }
   if (s_action_bar_layer) {
     layer_set_hidden(action_bar_layer_get_layer(s_action_bar_layer), true);
+  }
+  if (s_draw_layer) {
+    layer_set_hidden(s_draw_layer, true);
   }
   if (s_menu_action_hint_layer) {
     layer_set_hidden(s_menu_action_hint_layer, true);

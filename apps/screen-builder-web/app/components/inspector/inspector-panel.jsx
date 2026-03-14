@@ -38,6 +38,10 @@ export default function InspectorPanel({
   addScreenAction,
   removeScreenAction,
   updateScreenAction,
+  updateDrawField,
+  addDrawStep,
+  removeDrawStep,
+  updateDrawStep,
   getBindingsDraft,
   updateBindingsDraft,
   commitBindingsDraft,
@@ -68,6 +72,10 @@ export default function InspectorPanel({
               addScreenAction={addScreenAction}
               removeScreenAction={removeScreenAction}
               updateScreenAction={updateScreenAction}
+              updateDrawField={updateDrawField}
+              addDrawStep={addDrawStep}
+              removeDrawStep={removeDrawStep}
+              updateDrawStep={updateDrawStep}
               getBindingsDraft={getBindingsDraft}
               updateBindingsDraft={updateBindingsDraft}
               commitBindingsDraft={commitBindingsDraft}

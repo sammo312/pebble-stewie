@@ -19,6 +19,7 @@ export default function Toolbar({
   edges,
   unmappedCount,
   canExport,
+  hasBuilderOnlyDrawScreens,
   newNodeType,
   setNewNodeType,
   newRunTargetId,
@@ -59,6 +60,7 @@ export default function Toolbar({
           <option value="menu">{SCREEN_TYPE_ICONS.menu} Menu</option>
           <option value="card">{SCREEN_TYPE_ICONS.card} Card</option>
           <option value="scroll">{SCREEN_TYPE_ICONS.scroll} Scroll</option>
+          <option value="draw">{SCREEN_TYPE_ICONS.draw} Draw</option>
         </select>
         <Button size="xs" onClick={() => addScreen(newNodeType)}>
           <Plus className="size-3" /> Screen
@@ -110,10 +112,10 @@ export default function Toolbar({
       </Button>
 
       <Badge
-        variant={canExport ? 'default' : 'destructive'}
+        variant={hasBuilderOnlyDrawScreens ? 'secondary' : canExport ? 'default' : 'destructive'}
         className="text-[10px] h-5"
       >
-        {canExport ? 'Valid' : 'Invalid'}
+        {hasBuilderOnlyDrawScreens ? 'Prototype' : canExport ? 'Valid' : 'Invalid'}
       </Badge>
     </header>
   )

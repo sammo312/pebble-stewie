@@ -6,6 +6,7 @@ module.exports = {
   UI_TYPE_MENU: 1,
   UI_TYPE_CARD: 2,
   UI_TYPE_SCROLL: 3,
+  UI_TYPE_DRAW: 4,
   ACTION_TYPE_READY: 1,
   ACTION_TYPE_SELECT: 2,
   ACTION_TYPE_BACK: 3,
@@ -19,6 +20,7 @@ module.exports = {
   MAX_AGENT_OPTIONS: 5,
   MAX_CARD_ACTIONS: 3,
   MAX_MENU_ACTIONS: 6,
+  MAX_DRAW_STEPS: 6,
   MAX_ACTION_ID_LEN: 22,
   ACTION_SLOT_ORDER: ['up', 'select', 'down'],
   VALID_ACTION_ICONS: {

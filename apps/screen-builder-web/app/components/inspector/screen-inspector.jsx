@@ -2,10 +2,10 @@
 
 import { useState } from 'react'
 import { Button } from '@/app/components/ui/button'
-import { Separator } from '@/app/components/ui/separator'
 import { screenUsesSelectDrawer, getScreenActions, screenSupportsActions } from '@/app/lib/constants'
 import { getNestedValue, shouldRenderRunField } from '@/app/lib/graph-utils'
 import { FieldInput, EntityField } from './field-renderers'
+import DrawAnimationInspector from './draw-animation-inspector'
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react'
 
 function CollapsibleSection({ title, defaultOpen = true, children }) {
@@ -37,6 +37,10 @@ export default function ScreenInspector({
   addScreenAction,
   removeScreenAction,
   updateScreenAction,
+  updateDrawField,
+  addDrawStep,
+  removeDrawStep,
+  updateDrawStep,
   getBindingsDraft,
   updateBindingsDraft,
   commitBindingsDraft,
@@ -96,6 +100,22 @@ export default function ScreenInspector({
           })}
         </div>
       </CollapsibleSection>
+
+      {selectedScreen.type === 'draw' && (
+        <CollapsibleSection
+          title={`Drawing Animation (${(selectedScreen.drawing?.steps || []).length}/${graphBuilderSpec.limits.maxDrawSteps})`}
+          defaultOpen={true}
+        >
+          <DrawAnimationInspector
+            screen={selectedScreen}
+            maxDrawSteps={graphBuilderSpec.limits.maxDrawSteps}
+            updateDrawField={updateDrawField}
+            addDrawStep={addDrawStep}
+            removeDrawStep={removeDrawStep}
+            updateDrawStep={updateDrawStep}
+          />
+        </CollapsibleSection>
+      )}
 
       {selectedScreen.type === 'menu' && (
         <CollapsibleSection

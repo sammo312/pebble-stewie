@@ -62,14 +62,18 @@ export const FIELD_LABELS = {
   value: 'Value',
   labelTemplate: 'Dynamic Label',
   items: 'Menu Items',
-  actions: 'Actions'
+  actions: 'Actions',
+  'drawing.playMode': 'Playback',
+  'drawing.background': 'Stage',
+  'drawing.timelineMs': 'Timeline',
+  'drawing.steps': 'Motion Steps'
 }
 
 export const FIELD_DESCRIPTIONS = {
   id: 'Unique identifier for this screen',
-  type: 'menu = selectable list, card = info + buttons, scroll = long text with optional select action menu',
+  type: 'menu = selectable list, card = info + buttons, scroll = long text, draw = animated graphics canvas',
   title: 'Shown at top of screen (max 30 chars)',
-  body: 'Main content text',
+  body: 'Main content text or optional notes',
   titleTemplate: 'Use {{binding.property}} for live data, e.g. {{time.localString}}',
   bodyTemplate: 'Use {{binding.property}} for live data',
   bindings: 'Connect live data sources to dynamic templates',
@@ -85,7 +89,7 @@ export const FIELD_DESCRIPTIONS = {
   icon: 'Icon shown on the card action bar'
 }
 
-export const SCREEN_TYPE_ICONS = { menu: '\u2630', card: '\u25AD', scroll: '\u2195' }
+export const SCREEN_TYPE_ICONS = { menu: '\u2630', card: '\u25AD', scroll: '\u2195', draw: '\u25C8' }
 
 export const RUN_TARGETS = [
   {
@@ -130,6 +134,10 @@ export function screenUsesButtonSlots(screen) {
 
 export function screenUsesSelectDrawer(screen) {
   return !!screen && screen.type === 'scroll'
+}
+
+export function screenUsesDrawingCanvas(screen) {
+  return !!screen && screen.type === 'draw'
 }
 
 export function screenSupportsActions(screen) {

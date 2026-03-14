@@ -17,9 +17,9 @@
     "tailwindcss": "^4.2.1"
   },
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "next dev --port 3001",
     "build": "next build",
-    "start": "next start --port 3000",
+    "start": "next start --port 3001",
     "check-contract": "node scripts/check-contract.js"
   }
 }

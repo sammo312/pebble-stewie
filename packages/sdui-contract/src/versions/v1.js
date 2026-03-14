@@ -2,7 +2,7 @@
 
 var constants = require('../constants');
 
-var SCREEN_TYPES = ['menu', 'card', 'scroll'];
+var SCREEN_TYPES = ['menu', 'card', 'scroll', 'draw'];
 var INPUT_MODES = ['menu', 'voice', 'menu_or_voice'];
 var RUN_TYPES = ['navigate', 'agent_prompt', 'agent_command', 'effect'];
 var ACTION_SLOTS = constants.ACTION_SLOT_ORDER.slice();
@@ -19,6 +19,7 @@ var LIMITS = {
   maxCardActions: constants.MAX_CARD_ACTIONS,
   maxAgentOptions: constants.MAX_AGENT_OPTIONS,
   maxScrollBodyLen: constants.MAX_SCROLL_BODY_LEN,
+  maxDrawSteps: constants.MAX_DRAW_STEPS,
   maxScreenIdLen: constants.MAX_SCREEN_ID_LEN,
   recommended: {
     title: 24,
@@ -46,8 +47,22 @@ var SCREEN_FIELD_DEFS = {
   ],
   scroll: [
     { id: 'actions', type: 'list', required: false, maxItems: constants.MAX_MENU_ACTIONS }
-  ]
+  ],
+  draw: []
 };
+
+var DRAW_FIELD_DEFS = [
+  { id: 'drawing.playMode', type: 'enum', required: false, options: ['loop', 'once', 'ping_pong'] },
+  { id: 'drawing.background', type: 'enum', required: false, options: ['grid', 'dark', 'light'] },
+  { id: 'drawing.timelineMs', type: 'text', required: false },
+  { id: 'drawing.steps', type: 'list', required: false, maxItems: constants.MAX_DRAW_STEPS }
+];
+
+SCREEN_FIELD_DEFS.draw = DRAW_FIELD_DEFS;
+
+var DRAW_UI_SECTIONS = [
+  { id: 'drawing', title: 'Drawing Animation', defaultOpen: true, fields: ['drawing.playMode', 'drawing.background', 'drawing.timelineMs', 'drawing.steps'] }
+];
 
 var ITEM_FIELD_DEFS = [
   { id: 'id', type: 'text', required: true, maxLen: constants.MAX_ACTION_ID_LEN },
@@ -117,7 +132,7 @@ module.exports = {
       { id: 'basic', title: 'Basic', defaultOpen: true, fields: ['id', 'type', 'title', 'body'] },
       { id: 'dynamic', title: 'Dynamic Content', defaultOpen: false, fields: ['titleTemplate', 'bodyTemplate', 'bindings', 'input.mode'] }
     ],
-  menu: [
+    menu: [
       { id: 'items', title: 'Menu Items', defaultOpen: true, fields: ['items'] }
     ],
     card: [
@@ -125,6 +140,7 @@ module.exports = {
     ],
     scroll: [
       { id: 'actions', title: 'Select Action Menu Items', defaultOpen: true, fields: ['actions'] }
-    ]
+    ],
+    draw: DRAW_UI_SECTIONS
   }
 };

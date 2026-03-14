@@ -11,6 +11,8 @@ ActionMenu *s_menu_action_menu = NULL;
 ActionMenuLevel *s_menu_action_root_level = NULL;
 ScrollLayer *s_scroll_layer = NULL;
 TextLayer *s_scroll_body_layer = NULL;
+Layer *s_draw_layer = NULL;
+AppTimer *s_draw_timer = NULL;
 DictationSession *s_dictation_session = NULL;
 GBitmap *s_icon_play = NULL;
 GBitmap *s_icon_pause = NULL;
@@ -26,6 +28,8 @@ MenuAction s_menu_actions[MAX_MENU_ACTIONS];
 uint16_t s_menu_action_count = 0;
 CardAction s_card_actions[MAX_CARD_ACTIONS];
 uint16_t s_card_action_count = 0;
+DrawStep s_draw_steps[MAX_DRAW_STEPS];
+uint8_t s_draw_step_count = 0;
 
 char s_menu_title[MAX_TITLE_LEN] = "Menu";
 char s_menu_body[MAX_BODY_LEN] = "";
@@ -35,6 +39,11 @@ char s_scroll_body[MAX_SCROLL_BODY_LEN] = "";
 char s_current_screen_id[MAX_SCREEN_ID_LEN] = "";
 uint8_t s_current_ui_type = UI_TYPE_CARD;
 uint16_t s_selected_menu_row = 0;
+uint8_t s_draw_play_mode = DRAW_PLAY_MODE_LOOP;
+uint8_t s_draw_background = DRAW_BACKGROUND_GRID;
+uint16_t s_draw_timeline_ms = 1600;
+uint16_t s_draw_cycle_ms = 1600;
+uint32_t s_draw_elapsed_ms = 0;
 
 void stewie_copy_with_limit(char *dest, size_t dest_size, const char *src, size_t src_len) {
   if (dest_size == 0) {

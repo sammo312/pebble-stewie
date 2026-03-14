@@ -359,6 +359,89 @@ code {
   margin-bottom: 0.35rem;
 }
 
+.draw-preview-shell {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.draw-preview-shell.compact {
+  gap: 0.6rem;
+}
+
+.draw-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.draw-stage-frame {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0.75rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.draw-stage-svg {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  margin: 0 auto;
+  aspect-ratio: 144 / 168;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.draw-step-legend {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.draw-step-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.72rem;
+  background: rgba(9, 14, 22, 0.55);
+  color: var(--ink);
+}
+
+.draw-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.draw-step-meta {
+  margin-left: auto;
+  color: var(--ink-dim);
+  font-size: 0.68rem;
+}
+
+.draw-note {
+  border: 1px solid rgba(114, 228, 255, 0.2);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  background: rgba(10, 18, 28, 0.74);
+}
+
+.draw-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+
 /* --- Notice toast --- */
 .notice {
   border-radius: 6px;
