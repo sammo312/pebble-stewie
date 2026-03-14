@@ -27,9 +27,9 @@ function CollapsibleSection({ title, defaultOpen = true, children }) {
 
 export default function ScreenInspector({
   selectedScreen,
-  selectedScreenId,
   screenBuilderSpec,
   graphBuilderSpec,
+  screenIds,
   updateScreenField,
   addMenuItem,
   removeMenuItem,
@@ -69,6 +69,7 @@ export default function ScreenInspector({
                 value={value}
                 charCount={charCount}
                 onChange={(v) => updateScreenField(field, v)}
+                screenOptions={screenIds}
               />
             )
           })}
@@ -91,6 +92,7 @@ export default function ScreenInspector({
                 updateBindingsDraft={updateBindingsDraft}
                 commitBindingsDraft={commitBindingsDraft}
                 applyBindingsPreset={applyBindingsPreset}
+                screenOptions={screenIds}
               />
             )
           })}
@@ -126,6 +128,7 @@ export default function ScreenInspector({
                       entity={item}
                       updateFn={updateMenuItem}
                       index={index}
+                      screenOptions={screenIds}
                     />
                   ))}
               </div>
@@ -170,6 +173,7 @@ export default function ScreenInspector({
                       entity={action}
                       updateFn={updateScreenAction}
                       index={index}
+                      screenOptions={screenIds}
                     />
                   ))}
               </div>

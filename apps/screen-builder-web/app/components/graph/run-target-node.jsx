@@ -1,19 +1,20 @@
 import { Handle, Position } from 'reactflow'
 
-export default function RunTargetNode({ data }) {
+export default function RunTargetNode({ data, selected }) {
   return (
-    <div className="run-target-node">
+    <div className={`workflow-node ${selected ? 'workflow-node-selected' : ''}`}>
       <Handle
         type="target"
         id="target"
         position={Position.Left}
         className="pebble-handle target-handle"
         style={{ top: '50%' }}
-        title="Connect a menu item or action to this logic node"
+        title="Connect a screen hotspot to this workflow node"
       />
-      <div className="run-target-badge">[{data.badge}]</div>
-      <strong>{data.title}</strong>
-      <div className="run-target-sub">{data.subtitle}</div>
+      <div className="workflow-node-badge">[{data.badge}]</div>
+      <div className="workflow-node-title">{data.title}</div>
+      <div className="workflow-node-subtitle">{data.subtitle}</div>
+      <div className="workflow-node-footer">drop screen actions here</div>
     </div>
   )
 }

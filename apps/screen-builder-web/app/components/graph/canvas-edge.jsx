@@ -1,4 +1,4 @@
-import { BaseEdge, EdgeLabelRenderer, getBezierPath } from 'reactflow'
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from 'reactflow'
 
 export default function CanvasEdge(props) {
   const {
@@ -21,16 +21,17 @@ export default function CanvasEdge(props) {
   const laneOffset = (laneIndex - center) * 24
   const adjustedSourceY = sourceY + laneOffset * 0.28
   const adjustedTargetY = targetY - laneOffset * 0.28
-  const curvature = 0.22 + Math.min(Math.abs(laneOffset) / 180, 0.16)
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
     sourceY: adjustedSourceY,
     sourcePosition,
     targetX,
     targetY: adjustedTargetY,
     targetPosition,
-    curvature
+    borderRadius: 12,
+    offset: 28 + Math.abs(laneOffset) * 0.2
   })
+  const edgeToneClass = data?.focused ? 'edge-label-active' : 'edge-label-muted'
 
   return (
     <>
@@ -38,7 +39,7 @@ export default function CanvasEdge(props) {
       {label ? (
         <EdgeLabelRenderer>
           <div
-            className="edge-label"
+            className={`edge-label ${edgeToneClass}`}
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY + laneOffset * 0.22}px)`
             }}

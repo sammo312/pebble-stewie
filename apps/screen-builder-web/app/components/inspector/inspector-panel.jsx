@@ -46,6 +46,7 @@ export default function InspectorPanel({
   selectedScreen,
   selectedRunTarget,
   selectedNodeUsages,
+  screenIds,
   screenBuilderSpec,
   graphBuilderSpec,
   updateScreenField,
@@ -88,6 +89,7 @@ export default function InspectorPanel({
           {selectedScreen && (
             <ScreenInspector
               selectedScreen={selectedScreen}
+              screenIds={screenIds}
               screenBuilderSpec={screenBuilderSpec}
               graphBuilderSpec={graphBuilderSpec}
               updateScreenField={updateScreenField}

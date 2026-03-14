@@ -437,27 +437,31 @@ export function computeRunTargetPosition(index) {
   }
 }
 
-function buildEdgeLabel(sourceId, entity, index) {
-  const base = entity.label || entity.value || entity.id || `link-${index}`
-  return `${sourceId} → ${base}`
+function buildEdgeLabel(entity, index) {
+  return entity.label || entity.value || entity.id || `link-${index}`
 }
 
-function createGraphEdge({ source, sourceHandle, target, label, accent, kind, laneIndex = 0, laneCount = 1 }) {
+function createGraphEdge({ source, sourceHandle, target, label, accent, kind, laneIndex = 0, laneCount = 1, focused = false, muted = false }) {
   return {
     id: `${source}:${sourceHandle}:${target}`,
     source,
     sourceHandle,
     target,
-    label,
+    label: focused ? label : '',
     type: 'canvas',
     markerEnd: { type: MarkerType.ArrowClosed },
-    animated: true,
-    style: { stroke: accent },
-    data: { source, sourceHandle, target, kind, laneIndex, laneCount }
+    animated: focused,
+    style: {
+      stroke: accent,
+      strokeWidth: focused ? 1.8 : 1.15,
+      opacity: muted ? 0.14 : focused ? 1 : 0.42
+    },
+    data: { source, sourceHandle, target, kind, laneIndex, laneCount, focused, muted }
   }
 }
 
-export function buildGraphEdges(graph) {
+export function buildGraphEdges(graph, options = {}) {
+  const focusedNodeId = options.focusedNodeId || ''
   const edgeSpecs = []
   const screenIds = Object.keys(graph.screens)
 
@@ -478,7 +482,7 @@ export function buildGraphEdges(graph) {
           source: screenId,
           sourceHandle: `item-${item.id || index}`,
           target,
-          label: buildEdgeLabel(screenId, item, index),
+          label: buildEdgeLabel(item, index),
           accent: item.run.type === 'navigate' ? 'var(--ring)' : 'var(--muted-foreground)',
           kind: item.run.type
         })
@@ -497,7 +501,7 @@ export function buildGraphEdges(graph) {
           source: screenId,
           sourceHandle: `action-${action.id || index}`,
           target,
-          label: buildEdgeLabel(screenId, action, index),
+          label: buildEdgeLabel(action, index),
           accent:
             action.run.type === 'navigate'
               ? screenUsesSelectDrawer(screen)
@@ -518,26 +522,31 @@ export function buildGraphEdges(graph) {
   return edgeSpecs.map((spec) => {
     const laneIndex = seenByTarget[spec.target] || 0
     seenByTarget[spec.target] = laneIndex + 1
+    const focused = !!focusedNodeId && (spec.source === focusedNodeId || spec.target === focusedNodeId)
+    const muted = !!focusedNodeId && !focused
     return createGraphEdge({
       ...spec,
       laneIndex,
-      laneCount: countsByTarget[spec.target] || 1
+      laneCount: countsByTarget[spec.target] || 1,
+      focused,
+      muted
     })
   })
 }
 
-export function buildGraphNodes(graph, positions, selectedId, activeRunTargetIds, runTargetPositions, callbacks = {}) {
+export function buildGraphNodes(graph, previewGraph, positions, selectedId, activeRunTargetIds, runTargetPositions, callbacks = {}) {
   const screenIds = Object.keys(graph.screens)
   const screenNodes = screenIds.map((id, index) => {
     const screen = graph.screens[id]
+    const previewScreen = previewGraph?.screens?.[id] || screen
     const position = positions[id] || computeAutoPosition(index, screenIds.length)
     const isSelected = id === selectedId
     const tags = []
     if (graph.entryScreenId === id) {
       tags.push('entry')
     }
-    tags.push(screen.type)
-    if (screenUsesSelectDrawer(screen) && getScreenActions(screen).length > 0) {
+    tags.push(previewScreen.type)
+    if (screenUsesSelectDrawer(previewScreen) && getScreenActions(previewScreen).length > 0) {
       tags.push('drawer')
     }
 
@@ -549,18 +558,18 @@ export function buildGraphNodes(graph, positions, selectedId, activeRunTargetIds
         title: screen.title,
         tags,
         screen,
+        previewScreen,
         onAddMenuItem: callbacks.onAddMenuItem,
         onAddDrawerItem: callbacks.onAddDrawerItem
       },
       style: {
-        border: `1px solid ${isSelected ? 'var(--ring)' : 'var(--line)'}`,
-        background: isSelected ? 'rgba(255, 255, 255, 0.06)' : 'rgba(17, 18, 20, 0.82)',
-        color: 'var(--ink)',
-        borderRadius: 12,
-        padding: 6
+        border: '0',
+        background: 'transparent',
+        padding: 0,
+        width: screenUsesButtonSlots(previewScreen) ? 298 : 262
       },
       draggable: true,
-      className: isSelected ? 'node-selected' : ''
+      className: `graph-node-shell ${isSelected ? 'node-selected' : ''}`
     }
   })
 
@@ -577,10 +586,12 @@ export function buildGraphNodes(graph, positions, selectedId, activeRunTargetIds
         deletable: false,
         data: target,
         style: {
-          border: `1px solid ${isSelected ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.12)'}`,
-          boxShadow: isSelected ? '0 0 0 3px rgba(255, 255, 255, 0.06)' : '0 12px 28px rgba(0, 0, 0, 0.24)'
+          border: '0',
+          background: 'transparent',
+          padding: 0,
+          width: 220
         },
-        className: isSelected ? 'node-selected' : ''
+        className: `graph-node-shell ${isSelected ? 'node-selected' : ''}`
       }
     })
 

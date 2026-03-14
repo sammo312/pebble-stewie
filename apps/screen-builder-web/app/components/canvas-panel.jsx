@@ -1,12 +1,13 @@
 'use client'
 
 import { useMemo } from 'react'
-import ReactFlow, { Background, Controls, MiniMap } from 'reactflow'
+import ReactFlow, { Background, Controls } from 'reactflow'
 import 'reactflow/dist/style.css'
 import '../graph.css'
 import PebbleNode from './graph/pebble-node'
 import RunTargetNode from './graph/run-target-node'
 import CanvasEdge from './graph/canvas-edge'
+import CanvasPalette from './canvas-palette'
 import { isRunTargetId } from '@/app/lib/constants'
 
 export default function CanvasPanel({
@@ -19,7 +20,10 @@ export default function CanvasPanel({
   setFlowInstance,
   setSelectedNodeId,
   setSelectedScreenId,
-  jumpPreviewTo
+  jumpPreviewTo,
+  addScreen,
+  addRunTargetNode,
+  openCommandPalette
 }) {
   const nodeTypes = useMemo(() => ({ pebble: PebbleNode, runTarget: RunTargetNode }), [])
   const edgeTypes = useMemo(() => ({ canvas: CanvasEdge }), [])
@@ -27,10 +31,16 @@ export default function CanvasPanel({
   return (
     <div className="absolute inset-0 min-w-0 min-h-0">
       <div className="absolute inset-0 overflow-hidden bg-black">
+        <CanvasPalette
+          addScreen={addScreen}
+          addRunTargetNode={addRunTargetNode}
+          openCommandPalette={openCommandPalette}
+        />
         <ReactFlow
           nodes={nodes}
           edges={edges}
           fitView
+          fitViewOptions={{ padding: 0.22 }}
           deleteKeyCode={['Backspace', 'Delete']}
           onInit={setFlowInstance}
           onNodesChange={handleNodesChange}
@@ -51,11 +61,11 @@ export default function CanvasPanel({
           }}
           onEdgesDelete={handleEdgesDelete}
           nodesDraggable
+          connectionLineStyle={{ stroke: 'var(--ring)', strokeWidth: 1.5 }}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           proOptions={{ hideAttribution: true }}
         >
-          <MiniMap pannable zoomable />
           <Controls showInteractive={false} />
           <Background gap={22} size={1} color="#1f1f23" />
         </ReactFlow>

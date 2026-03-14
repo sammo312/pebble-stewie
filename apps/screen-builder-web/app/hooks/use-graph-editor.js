@@ -61,10 +61,6 @@ export default function useGraphEditor() {
   const [flowInstance, setFlowInstance] = useState(null)
   const [nodes, setNodes] = useNodesState([])
   const [edges, setEdges] = useEdgesState([])
-  const [newNodeType, setNewNodeType] = useState('menu')
-  const [newRunTargetId, setNewRunTargetId] = useState(RUN_TARGETS[0].id)
-  const [pendingSlotLink, setPendingSlotLink] = useState(null)
-  const [pendingMenuActionLink, setPendingMenuActionLink] = useState(null)
   const [showImportExport, setShowImportExport] = useState(false)
 
   const normalizedGraph = useMemo(() => graphSchema.normalizeCanonicalGraph(graph), [graph])
@@ -216,6 +212,7 @@ export default function useGraphEditor() {
   useEffect(() => {
     const nextNodes = buildGraphNodes(
       graph,
+      normalizedGraph,
       nodePositions,
       selectedNodeId,
       activeRunTargetIds,
@@ -226,11 +223,11 @@ export default function useGraphEditor() {
       }
     )
     setNodes(nextNodes)
-  }, [activeRunTargetIds, graph, handleAddDrawerItemFromGraph, handleAddMenuItemFromGraph, layoutTick, runTargetPositions, selectedNodeId, setNodes])
+  }, [activeRunTargetIds, graph, handleAddDrawerItemFromGraph, handleAddMenuItemFromGraph, layoutTick, normalizedGraph, runTargetPositions, selectedNodeId, setNodes])
 
   useEffect(() => {
-    setEdges(buildGraphEdges(graph))
-  }, [graph, setEdges])
+    setEdges(buildGraphEdges(graph, { focusedNodeId: selectedNodeId }))
+  }, [graph, selectedNodeId, setEdges])
 
   // --- Node change handler ---
 
@@ -347,113 +344,39 @@ export default function useGraphEditor() {
     setNodePositions(auto)
     setRunTargetPositions({})
     setLayoutTick((tick) => tick + 1)
-    setNodes(buildGraphNodes(graph, auto, selectedNodeId, activeRunTargetIds, {}, {
+    setNodes(buildGraphNodes(graph, normalizedGraph, auto, selectedNodeId, activeRunTargetIds, {}, {
       onAddMenuItem: handleAddMenuItemFromGraph,
       onAddDrawerItem: handleAddDrawerItemFromGraph
     }))
     setTimeout(() => flowInstance?.fitView({ padding: 0.22, duration: 400 }), 10)
   }
 
-  function addRunTargetNode(targetId) {
+  function addRunTargetNode(targetId, options = {}) {
     if (!targetId || !isRunTargetId(targetId)) {
       return
     }
 
+    if (options.position) {
+      setRunTargetPositions((prev) => ({ ...prev, [targetId]: options.position }))
+    }
     setVisibleRunTargetIds((prev) => (prev.includes(targetId) ? prev : prev.concat(targetId)))
     setSelectedNodeId(targetId)
     setNotice({ type: 'success', text: `Added ${getRunTargetDefinition(targetId)?.title || 'logic node'} to canvas` })
     setTimeout(() => flowInstance?.fitView({ padding: 0.22, duration: 250 }), 10)
   }
 
-  function commitSlotLink(link) {
-    if (!link) {
+  function focusNode(targetId) {
+    if (!targetId) {
       return
     }
 
-    const { sourceScreenId, slot, targetId, icon, label } = link
-    const run = buildRunForCanvasTarget(targetId)
-    if (!run) {
-      setNotice({ type: 'error', text: 'Link target is invalid' })
-      return
+    setSelectedNodeId(targetId)
+    if (!isRunTargetId(targetId) && graph.screens[targetId]) {
+      setSelectedScreenId(targetId)
+      setPreviewPlaceholderScreen(null)
+      setPreviewScreenId(targetId)
+      setPreviewHistory([])
     }
-
-    setGraph((prev) => {
-      const screen = prev.screens[sourceScreenId]
-      if (!screen || screen.type !== 'card') {
-        return prev
-      }
-
-      const actions = getScreenActions(screen).slice()
-      actions.push({
-        slot,
-        id: ensureUniqueEntityId(actions, `${slot}_action`, 'action'),
-        icon: icon || 'check',
-        label: label || defaultCardActionLabelForLink(slot, targetId),
-        value: isRunTargetId(targetId) ? slot : targetId,
-        run
-      })
-
-      return {
-        ...prev,
-        screens: {
-          ...prev.screens,
-          [sourceScreenId]: {
-            ...screen,
-            actions
-          }
-        }
-      }
-    })
-
-    setPendingSlotLink(null)
-    setSelectedScreenId(sourceScreenId)
-    setSelectedNodeId(sourceScreenId)
-    setNotice({ type: 'success', text: `Linked ${slot} to ${describeCanvasTarget(targetId)}` })
-  }
-
-  function commitMenuActionLink(link) {
-    if (!link) {
-      return
-    }
-
-    const { sourceScreenId, targetId, label } = link
-    const run = buildRunForCanvasTarget(targetId)
-    if (!run) {
-      setNotice({ type: 'error', text: 'Link target is invalid' })
-      return
-    }
-
-    setGraph((prev) => {
-      const screen = prev.screens[sourceScreenId]
-      if (!screen || !screenUsesSelectDrawer(screen)) {
-        return prev
-      }
-
-      const actions = getScreenActions(screen).slice()
-      const nextLabel = String(label || defaultMenuActionLabelForLink(targetId)).trim() || defaultMenuActionLabelForLink(targetId)
-      actions.push({
-        id: ensureUniqueEntityId(actions, nextLabel, 'drawer_item'),
-        label: nextLabel,
-        value: isRunTargetId(targetId) ? nextLabel : targetId,
-        run
-      })
-
-      return {
-        ...prev,
-        screens: {
-          ...prev.screens,
-          [sourceScreenId]: {
-            ...screen,
-            actions
-          }
-        }
-      }
-    })
-
-    setPendingMenuActionLink(null)
-    setSelectedScreenId(sourceScreenId)
-    setSelectedNodeId(sourceScreenId)
-    setNotice({ type: 'success', text: `Added action-menu item to ${describeCanvasTarget(targetId)}` })
   }
 
   function clearLinkByHandle(sourceScreenId, sourceHandle) {
@@ -730,13 +653,34 @@ export default function useGraphEditor() {
           return
         }
 
-        setPendingSlotLink({
-          sourceScreenId: source,
-          slot,
-          targetId: target,
-          icon: 'check',
-          label: defaultCardActionLabelForLink(slot, target)
+        setGraph((prev) => {
+          const currentScreen = prev.screens[source]
+          if (!currentScreen || currentScreen.type !== 'card') {
+            return prev
+          }
+
+          const actions = getScreenActions(currentScreen).slice()
+          actions.push({
+            slot,
+            id: ensureUniqueEntityId(actions, `${slot}_action`, 'action'),
+            icon: 'check',
+            label: defaultCardActionLabelForLink(slot, target),
+            value: isRunTargetId(target) ? slot : target,
+            run: buildRunForCanvasTarget(target)
+          })
+
+          return {
+            ...prev,
+            screens: {
+              ...prev.screens,
+              [source]: {
+                ...currentScreen,
+                actions
+              }
+            }
+          }
         })
+        setNotice({ type: 'success', text: `Created ${slot} action to ${describeCanvasTarget(target)}` })
         setSelectedScreenId(source)
         setSelectedNodeId(source)
         return
@@ -753,11 +697,32 @@ export default function useGraphEditor() {
           return
         }
 
-        setPendingMenuActionLink({
-          sourceScreenId: source,
-          targetId: target,
-          label: defaultMenuActionLabelForLink(target)
+        setGraph((prev) => {
+          const currentScreen = prev.screens[source]
+          if (!currentScreen || !screenUsesSelectDrawer(currentScreen)) {
+            return prev
+          }
+
+          const actions = getScreenActions(currentScreen).slice()
+          actions.push({
+            id: ensureUniqueEntityId(actions, 'drawer_item', 'drawer_item'),
+            label: defaultMenuActionLabelForLink(target),
+            value: isRunTargetId(target) ? '' : target,
+            run: buildRunForCanvasTarget(target)
+          })
+
+          return {
+            ...prev,
+            screens: {
+              ...prev.screens,
+              [source]: {
+                ...currentScreen,
+                actions
+              }
+            }
+          }
         })
+        setNotice({ type: 'success', text: `Created action-menu item to ${describeCanvasTarget(target)}` })
         setSelectedScreenId(source)
         setSelectedNodeId(source)
         return
@@ -1002,7 +967,7 @@ export default function useGraphEditor() {
     }
   }
 
-  function addScreen(kind) {
+  function addScreen(kind, options = {}) {
     const requestedType = kind === 'card' ? 'card' : kind === 'scroll' ? 'scroll' : 'menu'
     const titles = { menu: 'New Menu', card: 'New Card', scroll: 'New Scroll' }
     const nextId = ensureUniqueScreenId(graph, 'screen', '')
@@ -1026,6 +991,10 @@ export default function useGraphEditor() {
         [nextId]: nextScreen
       }
     }))
+
+    if (options.position) {
+      setNodePositions((prev) => ({ ...prev, [nextId]: options.position }))
+    }
 
     setSelectedScreenId(nextId)
     setSelectedNodeId(nextId)
@@ -1207,7 +1176,7 @@ export default function useGraphEditor() {
     setRunTargetPositions({})
     setVisibleRunTargetIds([])
     setLayoutTick((tick) => tick + 1)
-    setNodes(buildGraphNodes(normalized, {}, normalized.entryScreenId, collectRequiredRunTargetIds(normalized), {}, {
+    setNodes(buildGraphNodes(normalized, normalized, {}, normalized.entryScreenId, collectRequiredRunTargetIds(normalized), {}, {
       onAddMenuItem: handleAddMenuItemFromGraph,
       onAddDrawerItem: handleAddDrawerItemFromGraph
     }))
@@ -1268,10 +1237,6 @@ export default function useGraphEditor() {
     notice,
     nodes,
     edges,
-    newNodeType,
-    newRunTargetId,
-    pendingSlotLink,
-    pendingMenuActionLink,
     showImportExport,
     screenIds,
     unmappedCount,
@@ -1284,10 +1249,6 @@ export default function useGraphEditor() {
     // Setters
     setImportText,
     setNotice,
-    setNewNodeType,
-    setNewRunTargetId,
-    setPendingSlotLink,
-    setPendingMenuActionLink,
     setShowImportExport,
     setFlowInstance,
     setSelectedNodeId,
@@ -1309,8 +1270,6 @@ export default function useGraphEditor() {
     handleCopyExport,
     handleDownloadExport,
     loadCurrentIntoImportBox,
-    commitSlotLink,
-    commitMenuActionLink,
     handlePreviewActionMessage,
     handleNodesChange,
     handleConnect,
@@ -1322,6 +1281,7 @@ export default function useGraphEditor() {
     updateBindingsDraft,
     commitBindingsDraft,
     applyBindingsPreset,
-    describeCanvasTarget
+    describeCanvasTarget,
+    focusNode
   }
 }

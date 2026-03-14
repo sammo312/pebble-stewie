@@ -3,9 +3,54 @@
 import { FIELD_DESCRIPTIONS, fieldLabel, bindingPresets } from '@/app/lib/constants'
 import { getNestedValue } from '@/app/lib/graph-utils'
 import { Badge } from '@/app/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/app/components/ui/select'
 
-export function FieldInput({ field, value, charCount, onChange, getBindingsDraft, updateBindingsDraft, commitBindingsDraft, applyBindingsPreset }) {
+const NONE_VALUE = '__none__'
+
+function FieldSelect({ value, onChange, options, placeholder = 'Select option', allowNone = false }) {
+  const selectValue = value ? String(value) : allowNone ? NONE_VALUE : undefined
+
+  return (
+    <Select
+      value={selectValue}
+      onValueChange={(nextValue) => onChange(nextValue === NONE_VALUE ? '' : nextValue)}
+    >
+      <SelectTrigger className="field-input h-9 w-full border-line bg-black text-left text-xs text-ink">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent className="border-line bg-panel text-ink">
+        {allowNone ? <SelectItem value={NONE_VALUE}>(none)</SelectItem> : null}
+        {options.map((option) => (
+          <SelectItem value={String(option.value)} key={String(option.value)}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function resolveFieldOptions(field, screenOptions = []) {
+  if (field.id === 'run.screen') {
+    return screenOptions.map((screenId) => ({ value: screenId, label: screenId }))
+  }
+
+  if (field.type === 'enum') {
+    return (field.options || []).map((option) => ({ value: option, label: option }))
+  }
+
+  return []
+}
+
+export function FieldInput({ field, value, charCount, onChange, getBindingsDraft, updateBindingsDraft, commitBindingsDraft, applyBindingsPreset, screenOptions = [] }) {
   const desc = FIELD_DESCRIPTIONS[field.id]
+  const options = resolveFieldOptions(field, screenOptions)
 
   if (field.id === 'bindings') {
     return (
@@ -13,18 +58,12 @@ export function FieldInput({ field, value, charCount, onChange, getBindingsDraft
         <label className="field-label">{fieldLabel(field.id)}</label>
         {desc && <span className="field-hint">{desc}</span>}
         <div className="flex items-center gap-2 mb-1.5">
-          <select
-            className="field-input text-xs"
+          <FieldSelect
             value=""
-            onChange={(event) => applyBindingsPreset(event.target.value)}
-          >
-            <option value="">Select binding preset</option>
-            {bindingPresets.map((preset) => (
-              <option value={preset.id} key={preset.id}>
-                {preset.label}
-              </option>
-            ))}
-          </select>
+            onChange={applyBindingsPreset}
+            options={bindingPresets.map((preset) => ({ value: preset.id, label: preset.label }))}
+            placeholder="Select binding preset"
+          />
         </div>
         <textarea
           className="field-input area"
@@ -37,7 +76,7 @@ export function FieldInput({ field, value, charCount, onChange, getBindingsDraft
     )
   }
 
-  if (field.type === 'enum') {
+  if (field.type === 'enum' || (field.id === 'run.screen' && options.length > 0)) {
     return (
       <div key={field.id}>
         <label className="field-label">
@@ -47,18 +86,13 @@ export function FieldInput({ field, value, charCount, onChange, getBindingsDraft
           )}
         </label>
         {desc && <span className="field-hint">{desc}</span>}
-        <select
-          className="field-input"
+        <FieldSelect
           value={value}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          {!field.required && <option value="">(none)</option>}
-          {(field.options || []).map((option) => (
-            <option value={option} key={option}>
-              {option}
-            </option>
-          ))}
-        </select>
+          onChange={onChange}
+          options={options}
+          allowNone={!field.required}
+          placeholder={field.id === 'run.screen' ? 'Select screen' : 'Select option'}
+        />
       </div>
     )
   }
@@ -90,26 +124,22 @@ export function FieldInput({ field, value, charCount, onChange, getBindingsDraft
   )
 }
 
-export function EntityField({ field, entity, updateFn, index }) {
+export function EntityField({ field, entity, updateFn, index, screenOptions = [] }) {
   const raw = getNestedValue(entity, field.id)
   const value = String(raw || '')
+  const options = resolveFieldOptions(field, screenOptions)
 
-  if (field.type === 'enum') {
+  if (field.type === 'enum' || (field.id === 'run.screen' && options.length > 0)) {
     return (
       <div key={field.id}>
         <label className="field-label">{fieldLabel(field.id)}</label>
-        <select
-          className="field-input"
+        <FieldSelect
           value={value}
-          onChange={(event) => updateFn(index, field, event.target.value)}
-        >
-          <option value="">(none)</option>
-          {(field.options || []).map((option) => (
-            <option value={option} key={option}>
-              {option}
-            </option>
-          ))}
-        </select>
+          onChange={(nextValue) => updateFn(index, field, nextValue)}
+          options={options}
+          allowNone={!field.required}
+          placeholder={field.id === 'run.screen' ? 'Select screen' : 'Select option'}
+        />
       </div>
     )
   }

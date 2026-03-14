@@ -7,11 +7,12 @@ import CanvasPanel from './components/canvas-panel'
 import PreviewPanel from './components/preview-panel'
 import InspectorPanel from './components/inspector/inspector-panel'
 import ImportExportDialog from './components/dialogs/import-export-dialog'
-import { CreateSlotLinkDialog, CreateMenuActionDialog } from './components/dialogs/create-action-dialog'
+import CommandPalette from './components/command-palette'
 import { Toaster, toast } from './components/ui/sonner'
 
 export default function Page() {
   const editor = useGraphEditor()
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [previewOffset, setPreviewOffset] = useState({ x: 0, y: 0 })
   const [isPreviewDragging, setIsPreviewDragging] = useState(false)
   const [isPreviewNearDock, setIsPreviewNearDock] = useState(false)
@@ -115,16 +116,11 @@ export default function Page() {
         edges={editor.edges}
         unmappedCount={editor.unmappedCount}
         canExport={editor.canExport}
-        newNodeType={editor.newNodeType}
-        setNewNodeType={editor.setNewNodeType}
-        newRunTargetId={editor.newRunTargetId}
-        setNewRunTargetId={editor.setNewRunTargetId}
-        addScreen={editor.addScreen}
-        addRunTargetNode={editor.addRunTargetNode}
         deleteSelectedScreen={editor.deleteSelectedScreen}
         resetLayout={editor.resetLayout}
         setEntryScreenId={editor.setEntryScreenId}
         setShowImportExport={editor.setShowImportExport}
+        openCommandPalette={() => setCommandPaletteOpen(true)}
       />
 
       <main className="relative flex flex-1 min-h-0 overflow-hidden">
@@ -139,6 +135,9 @@ export default function Page() {
           setSelectedNodeId={editor.setSelectedNodeId}
           setSelectedScreenId={editor.setSelectedScreenId}
           jumpPreviewTo={editor.jumpPreviewTo}
+          addScreen={editor.addScreen}
+          addRunTargetNode={editor.addRunTargetNode}
+          openCommandPalette={() => setCommandPaletteOpen(true)}
         />
 
         <div className="pointer-events-none absolute right-4 top-4 bottom-4 z-20 w-[22rem]">
@@ -165,6 +164,7 @@ export default function Page() {
                 selectedScreen={editor.selectedScreen}
                 selectedRunTarget={editor.selectedRunTarget}
                 selectedNodeUsages={editor.selectedNodeUsages}
+                screenIds={editor.screenIds}
                 screenBuilderSpec={editor.screenBuilderSpec}
                 graphBuilderSpec={editor.graphBuilderSpec}
                 updateScreenField={editor.updateScreenField}
@@ -202,19 +202,15 @@ export default function Page() {
         loadCurrentIntoImportBox={editor.loadCurrentIntoImportBox}
       />
 
-      <CreateSlotLinkDialog
-        pendingSlotLink={editor.pendingSlotLink}
-        setPendingSlotLink={editor.setPendingSlotLink}
-        commitSlotLink={editor.commitSlotLink}
-        describeCanvasTarget={editor.describeCanvasTarget}
-        graphBuilderSpec={editor.graphBuilderSpec}
-      />
-
-      <CreateMenuActionDialog
-        pendingMenuActionLink={editor.pendingMenuActionLink}
-        setPendingMenuActionLink={editor.setPendingMenuActionLink}
-        commitMenuActionLink={editor.commitMenuActionLink}
-        describeCanvasTarget={editor.describeCanvasTarget}
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        screenIds={editor.screenIds}
+        selectedNodeId={editor.selectedNodeId}
+        addScreen={editor.addScreen}
+        addRunTargetNode={editor.addRunTargetNode}
+        focusNode={editor.focusNode}
+        resetLayout={editor.resetLayout}
       />
 
       <Toaster />
