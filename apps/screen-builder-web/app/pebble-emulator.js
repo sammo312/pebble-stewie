@@ -20,6 +20,79 @@ const EMULATOR_STATES = {
 const BOOT_SETTLE_MS = 25000
 const APP_READY_FALLBACK_MS = 8000
 
+function sanitizeText(value, fallback = '---') {
+  if (!value) return fallback
+  return String(value).replace(/\s+/g, ' ').trim().toUpperCase() || fallback
+}
+
+function buildMeter(progress, width = 18) {
+  const clamped = Math.max(0, Math.min(1, progress))
+  const filled = Math.round(clamped * width)
+  return `[${'#'.repeat(filled)}${'.'.repeat(width - filled)}]`
+}
+
+function getStageInfo(state, status) {
+  if (state === EMULATOR_STATES.ERROR) {
+    return { label: 'FAIL', progress: 1 }
+  }
+  if (state === EMULATOR_STATES.READY) {
+    return { label: 'READY', progress: 1 }
+  }
+  if (state === EMULATOR_STATES.LOADING) {
+    return { label: 'LOAD', progress: 0.2 }
+  }
+  if (state === EMULATOR_STATES.BOOTING) {
+    if (/launching/i.test(status)) {
+      return { label: 'APP', progress: 0.88 }
+    }
+    if (/booting/i.test(status)) {
+      return { label: 'OS', progress: 0.62 }
+    }
+    return { label: 'BOOT', progress: 0.72 }
+  }
+  return { label: 'IDLE', progress: 0 }
+}
+
+function describeActionType(type) {
+  switch (type) {
+    case ACTION_TYPES.READY:
+      return 'READY'
+    case ACTION_TYPES.SELECT:
+      return 'SELECT'
+    case ACTION_TYPES.BACK:
+      return 'BACK'
+    case ACTION_TYPES.VOICE:
+      return 'VOICE'
+    default:
+      return `TYPE${type || 0}`
+  }
+}
+
+function describeButton(button) {
+  switch (button) {
+    case 'up':
+      return 'UP'
+    case 'select':
+      return 'OK'
+    case 'down':
+      return 'DN'
+    case 'back':
+      return 'BK'
+    default:
+      return sanitizeText(button)
+  }
+}
+
+function hashPacket(packet) {
+  if (!packet || packet.length === 0) return ''
+  let hash = 2166136261
+  for (let i = 0; i < packet.length; i += 1) {
+    hash ^= packet[i]
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${packet.length}:${hash >>> 0}`
+}
+
 export default function PebbleEmulator({
   screen,
   autoboot,
@@ -30,8 +103,10 @@ export default function PebbleEmulator({
   revisionLabel
 }) {
   const iframeRef = useRef(null)
+  const pressedButtonsRef = useRef(new Set())
   const [state, setState] = useState(EMULATOR_STATES.IDLE)
   const [status, setStatus] = useState(autoboot ? 'Starting...' : 'Click Boot to start')
+  const [latestConsoleEvent, setLatestConsoleEvent] = useState('---')
   const [iframeLoaded, setIframeLoaded] = useState(false)
   const screenRef = useRef(screen)
   const bootedRef = useRef(false)
@@ -39,6 +114,7 @@ export default function PebbleEmulator({
   const bootSettleTimerRef = useRef(null)
   const readyFallbackTimerRef = useRef(null)
   const controlRemainderRef = useRef(new Uint8Array(0))
+  const lastSentPacketHashRef = useRef('')
   const onLogRef = useRef(onLog)
   const onButtonClickRef = useRef(onButtonClick)
   const onActionMessageRef = useRef(onActionMessage)
@@ -48,6 +124,18 @@ export default function PebbleEmulator({
   useEffect(() => { onLogRef.current = onLog }, [onLog])
   useEffect(() => { onButtonClickRef.current = onButtonClick }, [onButtonClick])
   useEffect(() => { onActionMessageRef.current = onActionMessage }, [onActionMessage])
+
+  const setConsoleEvent = useCallback((line) => {
+    setLatestConsoleEvent(sanitizeText(line, '---'))
+  }, [])
+
+  const releaseAllButtons = useCallback(() => {
+    if (!pressedButtonsRef.current.size) return
+    pressedButtonsRef.current.forEach((button) => {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'button', button, action: 'up' }, '*')
+    })
+    pressedButtonsRef.current.clear()
+  }, [])
 
   const clearBootTimers = useCallback(() => {
     if (bootSettleTimerRef.current) {
@@ -64,6 +152,7 @@ export default function PebbleEmulator({
     clearBootTimers()
     bootedRef.current = false
     controlRemainderRef.current = new Uint8Array(0)
+    lastSentPacketHashRef.current = ''
   }, [clearBootTimers])
 
   const clearReadyFallback = useCallback(() => {
@@ -76,7 +165,7 @@ export default function PebbleEmulator({
   const injectToEmulator = useCallback((packet) => {
     if (!iframeRef.current?.contentWindow || !packet) return false
     iframeRef.current.contentWindow.postMessage(
-      { type: 'inject', data: Array.from(packet) }, '*'
+      { type: 'inject', data: packet }, '*'
     )
     return true
   }, [])
@@ -85,6 +174,11 @@ export default function PebbleEmulator({
     if (!nextScreen) return false
     const packet = buildScreenRenderPacket(nextScreen)
     if (!packet) return false
+    const packetHash = hashPacket(packet)
+    if (packetHash && packetHash === lastSentPacketHashRef.current) {
+      return false
+    }
+    lastSentPacketHashRef.current = packetHash
     injectToEmulator(packet)
     if (logLine) {
       onLogRef.current?.(logLine)
@@ -111,7 +205,6 @@ export default function PebbleEmulator({
     bootedRef.current = true
     setState(EMULATOR_STATES.READY)
     setStatus('Ready')
-    console.log(`[emulator] Stewie ready (${reason})`)
   }, [clearReadyFallback, sendScreenPacket])
 
   // When screen changes and emulator is ready, send it (debounced)
@@ -120,7 +213,7 @@ export default function PebbleEmulator({
     if (sendTimerRef.current) clearTimeout(sendTimerRef.current)
     sendTimerRef.current = setTimeout(() => {
       sendScreenPacket(screen, `Sent screen "${screen.id}" to emulator`)
-    }, 300)
+    }, 180)
     return () => { if (sendTimerRef.current) clearTimeout(sendTimerRef.current) }
   }, [screen, state, sendScreenPacket])
 
@@ -128,12 +221,14 @@ export default function PebbleEmulator({
     return () => {
       if (sendTimerRef.current) clearTimeout(sendTimerRef.current)
       clearBootTimers()
+      releaseAllButtons()
     }
-  }, [clearBootTimers])
+  }, [clearBootTimers, releaseAllButtons])
 
   const boot = useCallback(() => {
     if (state !== EMULATOR_STATES.IDLE && state !== EMULATOR_STATES.ERROR) return
     resetBootState()
+    setLatestConsoleEvent('BOOT REQUEST')
     setState(EMULATOR_STATES.LOADING)
     setStatus('Loading emulator...')
     if (iframeRef.current) {
@@ -143,8 +238,33 @@ export default function PebbleEmulator({
 
   const postButton = useCallback((button, action = 'click') => {
     if (!button) return
+    if (action === 'down' || action === 'click' || action === 'long') {
+      setConsoleEvent(`BTN ${describeButton(button)}`)
+    }
+    if (action === 'down') {
+      pressedButtonsRef.current.add(button)
+    } else if (action === 'up') {
+      pressedButtonsRef.current.delete(button)
+    } else if (action === 'click' || action === 'long') {
+      pressedButtonsRef.current.delete(button)
+    }
     iframeRef.current?.contentWindow?.postMessage({ type: 'button', button, action }, '*')
-  }, [])
+  }, [setConsoleEvent])
+
+  const buttonPressProps = useCallback((button) => ({
+    onMouseDown: (event) => {
+      event.preventDefault()
+      postButton(button, 'down')
+    },
+    onMouseUp: () => postButton(button, 'up'),
+    onMouseLeave: () => postButton(button, 'up'),
+    onTouchStart: (event) => {
+      event.preventDefault()
+      postButton(button, 'down')
+    },
+    onTouchEnd: () => postButton(button, 'up'),
+    onTouchCancel: () => postButton(button, 'up')
+  }), [postButton])
 
   // Autoboot once the iframe is definitely loaded.
   useEffect(() => {
@@ -168,15 +288,14 @@ export default function PebbleEmulator({
           break
         case 'emulator-ready':
           resetBootState()
+          setConsoleEvent('DISPLAY READY')
           setState(EMULATOR_STATES.BOOTING)
           setStatus('Booting PebbleOS (~25s)...')
-          console.log('[emulator] Display active, waiting for PebbleOS to boot...')
           bootSettleTimerRef.current = setTimeout(() => {
             if (iframeRef.current?.contentWindow) {
               const launchPacket = buildLaunchStewiePacket()
-              console.log('[emulator] Launching stewie...')
               iframeRef.current.contentWindow.postMessage(
-                { type: 'inject', data: Array.from(launchPacket) }, '*'
+                { type: 'inject', data: launchPacket }, '*'
               )
               setStatus('Launching stewie...')
               clearReadyFallback()
@@ -190,6 +309,7 @@ export default function PebbleEmulator({
           break
         case 'emulator-error':
           clearBootTimers()
+          setConsoleEvent(`ERROR ${data.text}`)
           setState(EMULATOR_STATES.ERROR)
           setStatus(`Error: ${data.text}`)
           break
@@ -198,13 +318,19 @@ export default function PebbleEmulator({
           setStatus('Booting PebbleOS...')
           break
         case 'emulator-control-bytes': {
-          const bytes = new Uint8Array(Array.isArray(data.data) ? data.data : [])
+          const bytes =
+            data.data instanceof Uint8Array
+              ? data.data
+              : new Uint8Array(Array.isArray(data.data) ? data.data : [])
           const decoded = decodeStewieActionMessagesFromChunk(bytes, controlRemainderRef.current)
           controlRemainderRef.current = decoded.remainder
           decoded.actions.forEach((actionMessage) => {
             if (actionMessage.type === ACTION_TYPES.READY) {
               markStewieReady('native')
             }
+            setConsoleEvent(
+              `ACT ${describeActionType(actionMessage.type)} ${actionMessage.itemId || actionMessage.screenId || actionMessage.text || ''}`.trim()
+            )
             onActionMessageRef.current?.(actionMessage)
           })
           break
@@ -217,12 +343,13 @@ export default function PebbleEmulator({
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [clearBootTimers, clearReadyFallback, markStewieReady, resetBootState])
+  }, [clearBootTimers, clearReadyFallback, markStewieReady, resetBootState, setConsoleEvent])
 
   const sendCurrentScreen = useCallback(() => {
     if (!screenRef.current) return
     if (!bootedRef.current) {
       console.log('[emulator] Force-launching stewie before sending screen')
+      setConsoleEvent('SEND WAITING')
       injectToEmulator(buildLaunchStewiePacket())
       clearReadyFallback()
       readyFallbackTimerRef.current = setTimeout(() => {
@@ -230,8 +357,9 @@ export default function PebbleEmulator({
       }, APP_READY_FALLBACK_MS)
       return
     }
+    setConsoleEvent(`SEND ${screenRef.current.id}`)
     sendScreenPacket(screenRef.current, `Sent screen "${screenRef.current.id}" to emulator`)
-  }, [clearReadyFallback, injectToEmulator, markStewieReady, sendScreenPacket])
+  }, [clearReadyFallback, injectToEmulator, markStewieReady, sendScreenPacket, setConsoleEvent])
 
   const showsHoldSelectDrawer =
     !!screen &&
@@ -239,22 +367,25 @@ export default function PebbleEmulator({
     Array.isArray(screen.actions) &&
     screen.actions.length > 0
 
+  const stage = getStageInfo(state, status)
+  const readout = [
+    `EMU   ${sanitizeText(state)}`,
+    `TASK  ${buildMeter(stage.progress)} ${stage.label}`,
+    `STAT  ${sanitizeText(status, 'WAITING')}`,
+    `SCR   ${sanitizeText(activeScreenId || 'none')}`,
+    `REV   ${sanitizeText(revisionLabel || 'none')}`,
+    `EVT   ${latestConsoleEvent}`
+  ]
+
+  if (showsHoldSelectDrawer) {
+    readout.push('MENU  SELECT OPENS ACTIONS')
+  }
+
   return (
     <div className="emulator-container">
       <div className="emulator-header">
-        <div>
-          <div className="emulator-status">
-            <span className={`emulator-dot ${state}`} />
-            <span className="emulator-status-text">{status}</span>
-          </div>
-          <div className="emulator-meta">
-            {activeScreenId || 'no-screen'} {revisionLabel ? `· rev ${revisionLabel}` : ''}
-          </div>
-          {showsHoldSelectDrawer && (
-            <div className="emulator-meta">
-              select action menu: `Enter` or middle button
-            </div>
-          )}
+        <div className="emulator-console">
+          <pre className="emulator-readout">{readout.join('\n')}</pre>
         </div>
         <div className="button-row">
           {(state === EMULATOR_STATES.IDLE || state === EMULATOR_STATES.ERROR) && (
@@ -270,6 +401,11 @@ export default function PebbleEmulator({
       <div
         className="emulator-watch"
         tabIndex={0}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            releaseAllButtons()
+          }
+        }}
         onKeyDown={(e) => {
           let btn = null
           if (e.key === 'ArrowLeft' || e.key === 'Escape') btn = 'back'
@@ -278,14 +414,27 @@ export default function PebbleEmulator({
           else if (e.key === 'ArrowDown') btn = 'down'
           if (btn) {
             e.preventDefault()
-            postButton(btn)
+            if (!e.repeat) {
+              postButton(btn, 'down')
+            }
+          }
+        }}
+        onKeyUp={(e) => {
+          let btn = null
+          if (e.key === 'ArrowLeft' || e.key === 'Escape') btn = 'back'
+          else if (e.key === 'ArrowUp') btn = 'up'
+          else if (e.key === 'ArrowRight' || e.key === 'Enter') btn = 'select'
+          else if (e.key === 'ArrowDown') btn = 'down'
+          if (btn) {
+            e.preventDefault()
+            postButton(btn, 'up')
           }
         }}
       >
         <div className="emu-btn-col emu-btn-left">
           <button type="button" className="emu-btn" title="Back (Left / Esc)"
-            onClick={() => postButton('back')}>
-            &larr;
+            {...buttonPressProps('back')}>
+            BK
           </button>
         </div>
 
@@ -302,20 +451,20 @@ export default function PebbleEmulator({
 
         <div className="emu-btn-col emu-btn-right">
           <button type="button" className="emu-btn" title="Up (Arrow Up)"
-            onClick={() => postButton('up')}>
-            &uarr;
+            {...buttonPressProps('up')}>
+            UP
           </button>
           <button
             type="button"
             className="emu-btn"
             title="Select (Right / Enter)"
-            onClick={() => postButton('select')}
+            {...buttonPressProps('select')}
           >
-            &bull;
+            OK
           </button>
           <button type="button" className="emu-btn" title="Down (Arrow Down)"
-            onClick={() => postButton('down')}>
-            &darr;
+            {...buttonPressProps('down')}>
+            DN
           </button>
         </div>
       </div>

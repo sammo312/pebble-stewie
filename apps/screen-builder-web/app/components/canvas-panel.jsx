@@ -26,7 +26,7 @@ export default function CanvasPanel({
 
   return (
     <div className="absolute inset-0 min-w-0 min-h-0">
-      <div className="absolute inset-0 overflow-hidden bg-[rgba(8,12,20,0.92)]">
+      <div className="absolute inset-0 overflow-hidden bg-black">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -57,7 +57,7 @@ export default function CanvasPanel({
         >
           <MiniMap pannable zoomable />
           <Controls showInteractive={false} />
-          <Background gap={22} size={1} color="#2d456d" />
+          <Background gap={22} size={1} color="#1f1f23" />
         </ReactFlow>
       </div>
     </div>

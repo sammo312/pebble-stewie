@@ -11,28 +11,36 @@ export default function PebbleNode({ data, selected, id }) {
   const tags = data.tags || []
   const screen = data.screen || {}
   const isMenu = screen.type === 'menu'
+  const usesButtonSlots = screenUsesButtonSlots(screen)
   const usesDrawer = screenUsesSelectDrawer(screen)
   const actions = getScreenActions(screen)
   const hasActionList = actions.length > 0
   const isEntry = tags.includes('entry')
   const typeIcon = SCREEN_TYPE_ICONS[screen.type] || ''
   return (
-    <div className={`node-card-shell ${selected ? 'node-selected' : ''}`}>
+    <div className={`node-card-shell ${selected ? 'node-selected' : ''} ${usesButtonSlots ? 'node-card-shell-buttons' : ''}`}>
       <Handle type="target" id="target" position={Position.Left} className="pebble-handle target-handle" style={{ top: '50%' }} title="Incoming connection" />
-      {screenUsesButtonSlots(screen) && (
+      {usesButtonSlots && (
         <>
           <Handle type="source" id="slot-up" position={Position.Right} className="pebble-handle" style={{ top: '14%' }} title="Drag to a screen or logic node to create an UP action" />
           <Handle type="source" id="slot-select" position={Position.Right} className="pebble-handle" style={{ top: '50%' }} title="Drag to a screen or logic node to create a SELECT action" />
           <Handle type="source" id="slot-down" position={Position.Right} className="pebble-handle" style={{ top: '86%' }} title="Drag to a screen or logic node to create a DOWN action" />
         </>
       )}
+      {usesButtonSlots && (
+        <div className="node-slot-rail" aria-hidden="true">
+          <span className="node-slot-pill node-slot-pill-up">UP</span>
+          <span className="node-slot-pill node-slot-pill-select">OK</span>
+          <span className="node-slot-pill node-slot-pill-down">DN</span>
+        </div>
+      )}
 
       <div className={`node-card node-square ${isEntry ? 'node-entry' : ''}`}>
         <div className="node-head">
           <strong><span className="node-type-icon">{typeIcon}</span> {data.title || id}</strong>
-          <div className="chip-row">
-            {tags.map((tag) => (
-              <span className={`chip tiny ${tag === 'entry' ? 'chip-accent' : ''}`} key={tag}>{tag}</span>
+            <div className="chip-row">
+              {tags.map((tag) => (
+              <span className={`chip tiny ${tag === 'entry' ? 'chip-accent' : ''}`} key={tag}>[{tag}]</span>
             ))}
           </div>
         </div>

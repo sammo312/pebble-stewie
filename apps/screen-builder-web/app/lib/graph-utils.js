@@ -479,7 +479,7 @@ export function buildGraphEdges(graph) {
           sourceHandle: `item-${item.id || index}`,
           target,
           label: buildEdgeLabel(screenId, item, index),
-          accent: item.run.type === 'navigate' ? 'var(--accent)' : '#ffbf69',
+          accent: item.run.type === 'navigate' ? 'var(--ring)' : 'var(--muted-foreground)',
           kind: item.run.type
         })
       })
@@ -493,19 +493,19 @@ export function buildGraphEdges(graph) {
       if (!target) {
         return
       }
-      edgeSpecs.push({
-        source: screenId,
-        sourceHandle: `action-${action.id || index}`,
-        target,
-        label: buildEdgeLabel(screenId, action, index),
-        accent:
-          action.run.type === 'navigate'
-            ? screenUsesSelectDrawer(screen)
-              ? '#72e4ff'
-              : 'var(--accent-2)'
-            : '#ffd166',
-        kind: action.run.type
-      })
+        edgeSpecs.push({
+          source: screenId,
+          sourceHandle: `action-${action.id || index}`,
+          target,
+          label: buildEdgeLabel(screenId, action, index),
+          accent:
+            action.run.type === 'navigate'
+              ? screenUsesSelectDrawer(screen)
+                ? 'var(--ring)'
+                : 'var(--accent-2)'
+            : 'var(--muted-foreground)',
+          kind: action.run.type
+        })
     })
   }
 
@@ -553,8 +553,8 @@ export function buildGraphNodes(graph, positions, selectedId, activeRunTargetIds
         onAddDrawerItem: callbacks.onAddDrawerItem
       },
       style: {
-        border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--line)'}`,
-        background: isSelected ? 'rgba(52, 198, 167, 0.12)' : 'rgba(10, 15, 24, 0.78)',
+        border: `1px solid ${isSelected ? 'var(--ring)' : 'var(--line)'}`,
+        background: isSelected ? 'rgba(255, 255, 255, 0.06)' : 'rgba(17, 18, 20, 0.82)',
         color: 'var(--ink)',
         borderRadius: 12,
         padding: 6
@@ -577,8 +577,8 @@ export function buildGraphNodes(graph, positions, selectedId, activeRunTargetIds
         deletable: false,
         data: target,
         style: {
-          border: `1px solid ${isSelected ? 'rgba(255, 191, 105, 0.9)' : 'rgba(255, 191, 105, 0.45)'}`,
-          boxShadow: isSelected ? '0 0 0 3px rgba(255, 191, 105, 0.12)' : '0 12px 28px rgba(0, 0, 0, 0.24)'
+          border: `1px solid ${isSelected ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.12)'}`,
+          boxShadow: isSelected ? '0 0 0 3px rgba(255, 255, 255, 0.06)' : '0 12px 28px rgba(0, 0, 0, 0.24)'
         },
         className: isSelected ? 'node-selected' : ''
       }

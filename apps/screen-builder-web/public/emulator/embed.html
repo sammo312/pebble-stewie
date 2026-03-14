@@ -25,14 +25,10 @@
         var booted = false;
         var controlLogOffset = 0;
         var controlLogTimer = 0;
+        var buttonReleaseTimers = {};
 
         function postToParent(data) {
             try { window.parent.postMessage(data, parentOrigin); } catch(e) {}
-        }
-
-        function postButtonEvent(button, action) {
-            if (!button) return;
-            postToParent({ type: 'emulator-button', button: button, action: action || 'click' });
         }
 
         // QEMU Module configuration
@@ -72,7 +68,10 @@
         // Framebuffer rendering
         var lastFrameCount = 0;
         var totalFrames = 0;
-        var canvasCtx = document.getElementById('canvas').getContext('2d');
+        var canvasCtx = document.getElementById('canvas').getContext('2d', { alpha: false, desynchronized: true });
+        if (canvasCtx) {
+            canvasCtx.imageSmoothingEnabled = false;
+        }
         var cachedImgData = null;
         var cachedWidth = 0;
         var cachedHeight = 0;
@@ -118,7 +117,6 @@
                 }
                 canvasCtx.putImageData(cachedImgData, 0, 0);
 
-                postToParent({ type: 'emulator-frame' });
             } catch(e) {}
         }
         setInterval(renderLoop, 32);
@@ -147,7 +145,7 @@
                 var delta = bytes.slice(controlLogOffset);
                 controlLogOffset = bytes.length;
                 if (delta.length > 0) {
-                    postToParent({ type: 'emulator-control-bytes', data: Array.from(delta) });
+                    postToParent({ type: 'emulator-control-bytes', data: delta });
                 }
             } catch(e) {}
         }
@@ -155,7 +153,7 @@
         function startControlLogPump() {
             stopControlLogPump();
             controlLogOffset = 0;
-            controlLogTimer = setInterval(pumpControlLog, 100);
+            controlLogTimer = setInterval(pumpControlLog, 24);
         }
 
         // Button input
@@ -167,6 +165,29 @@
         var buttonStateAddr = 0;
         var syntheticLongPress = {};
         var btnMap = { back: BUTTON_BACK, up: BUTTON_UP, select: BUTTON_SELECT, down: BUTTON_DOWN };
+
+        function clearButtonRelease(button) {
+            if (!buttonReleaseTimers[button]) return;
+            clearTimeout(buttonReleaseTimers[button]);
+            buttonReleaseTimers[button] = 0;
+        }
+
+        function scheduleButtonRelease(button, bit, durationMs) {
+            clearButtonRelease(button);
+            buttonReleaseTimers[button] = setTimeout(function() {
+                updateButtons(bit, false);
+                buttonReleaseTimers[button] = 0;
+            }, durationMs);
+        }
+
+        function triggerSyntheticClick(button, bit, durationMs) {
+            clearButtonRelease(button);
+            updateButtons(bit, false);
+            setTimeout(function() {
+                updateButtons(bit, true);
+                scheduleButtonRelease(button, bit, durationMs);
+            }, 0);
+        }
 
         function updateButtons(bit, pressed) {
             if (pressed) buttonState |= bit;
@@ -203,13 +224,9 @@
                         updateButtons(entry.bit, false);
                         syntheticLongPress[entry.button] = false;
                     }, 850);
-                    postButtonEvent(entry.button, 'long');
                     return;
                 }
                 updateButtons(entry.bit, true);
-                if (!e.repeat) {
-                    postButtonEvent(entry.button, 'click');
-                }
             }
         });
         document.addEventListener('keyup', function(e) {
@@ -237,17 +254,18 @@
                 var bit = btnMap[data.button];
                 if (bit !== undefined) {
                     if (data.action === 'click') {
-                        updateButtons(bit, true);
-                        setTimeout(function() { updateButtons(bit, false); }, 200);
+                        triggerSyntheticClick(data.button, bit, 75);
                     } else if (data.action === 'long') {
+                        clearButtonRelease(data.button);
                         updateButtons(bit, true);
-                        setTimeout(function() { updateButtons(bit, false); }, 850);
+                        scheduleButtonRelease(data.button, bit, 850);
                     } else if (data.action === 'down') {
+                        clearButtonRelease(data.button);
                         updateButtons(bit, true);
                     } else if (data.action === 'up') {
+                        clearButtonRelease(data.button);
                         updateButtons(bit, false);
                     }
-                    postButtonEvent(data.button, data.action || 'click');
                 }
             }
 
@@ -259,7 +277,7 @@
                     return;
                 }
                 try {
-                    var bytes = new Uint8Array(data.data);
+                    var bytes = data.data instanceof Uint8Array ? data.data : new Uint8Array(data.data);
                     // Use the exported ring buffer instead of malloc
                     var bufAddr = Module._pebble_serial_inject_buf_addr();
                     var wpAddr = Module._pebble_serial_inject_write_pos_addr();
@@ -272,10 +290,7 @@
                     }
                     // Atomic store of new write position
                     Atomics.store(Module.HEAPU32, wpAddr >> 2, writePos);
-                    console.log('[embed] Injected', bytes.length, 'bytes into ring buffer');
-                    postToParent({ type: 'inject-ok' });
                 } catch(e) {
-                    console.error('[embed] inject error:', e);
                     postToParent({ type: 'inject-error', text: e.message });
                 }
             }

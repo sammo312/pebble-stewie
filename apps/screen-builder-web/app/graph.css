@@ -2,15 +2,15 @@
    require !important to override ReactFlow's inline styles. */
 
 .pebble-handle {
-  width: 10px !important;
-  height: 10px !important;
-  border: 1px solid var(--accent) !important;
-  background: rgba(52, 198, 167, 0.8) !important;
-  border-radius: 4px !important;
+  width: 8px !important;
+  height: 8px !important;
+  border: 1px solid var(--ring) !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-radius: 0 !important;
 }
 
 .target-handle {
-  background: rgba(255, 255, 255, 0.6) !important;
+  background: rgba(255, 255, 255, 0.18) !important;
   border-color: var(--line) !important;
 }
 
@@ -29,10 +29,27 @@
 }
 
 .react-flow__controls {
-  background: rgba(9, 14, 22, 0.82) !important;
+  background: #020202 !important;
   border: 1px solid var(--line) !important;
+  border-radius: 0 !important;
 }
 
 .react-flow__minimap-mask {
-  fill: rgba(10, 15, 24, 0.55);
+  fill: rgba(0, 0, 0, 0.6);
+}
+
+.react-flow__controls-button {
+  background: transparent !important;
+  border-bottom: 1px solid var(--line) !important;
+  color: var(--ink-dim) !important;
+  border-radius: 0 !important;
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: 0 !important;
+}
+
+.react-flow__controls-button:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: var(--ink) !important;
 }

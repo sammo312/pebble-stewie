@@ -2,6 +2,11 @@
 
 import dynamic from 'next/dynamic'
 import { Badge } from '@/app/components/ui/badge'
+import {
+  Card,
+  CardContent,
+  CardHeader
+} from '@/app/components/ui/card'
 
 const PebbleEmulator = dynamic(() => import('../pebble-emulator'), { ssr: false })
 
@@ -11,22 +16,34 @@ export default function PreviewPanel({
   previewScreenId,
   previewRevision,
   handlePreviewActionMessage,
-  setNotice
+  setNotice,
+  onHandlePointerDown,
+  onHandleDoubleClick
 }) {
   return (
-    <section className="rounded-2xl border border-line bg-panel/95 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
-      <div className="flex items-center justify-between w-full px-3 py-2 border-b border-line">
-        <span className="text-[10px] text-ink-dim uppercase tracking-wider font-medium">Preview</span>
-        <div className="flex items-center gap-1">
-          <Badge variant="outline" className="text-[9px] h-4 border-line text-ink-dim px-1">
-            {previewScreen?.id || 'none'}
-          </Badge>
-          <Badge variant="outline" className="text-[9px] h-4 border-line text-ink-dim px-1">
-            {previewRevision}
-          </Badge>
+    <Card className="overflow-hidden border-line/80 bg-card shadow-none">
+      <CardHeader className="gap-2 border-b border-line/70 px-4 py-2">
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onPointerDown={onHandlePointerDown}
+            onDoubleClick={onHandleDoubleClick}
+            className="tui-chrome cursor-grab touch-none border border-line/80 bg-panel-soft px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim active:cursor-grabbing"
+            aria-label="Drag emulator"
+          >
+            ::::
+          </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline" className="border-line/80 bg-panel-soft text-[10px] text-ink-dim">
+              scr {previewScreen?.id || previewScreenId || 'none'}
+            </Badge>
+            <Badge variant="outline" className="border-line/80 bg-panel-soft text-[10px] text-ink-dim">
+              rev {previewRevision}
+            </Badge>
+          </div>
         </div>
-      </div>
-      <div className="flex items-center justify-center p-3">
+      </CardHeader>
+      <CardContent className="flex items-center justify-center p-4">
         <PebbleEmulator
           screen={previewRenderedScreen}
           autoboot
@@ -35,7 +52,7 @@ export default function PreviewPanel({
           onActionMessage={handlePreviewActionMessage}
           onLog={(msg) => setNotice({ type: 'success', text: msg })}
         />
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   )
 }

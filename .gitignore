@@ -24,3 +24,7 @@ apps/*/.next/
 packages/*/node_modules/
 .lock-waf*
 internal-docs/
+
+# Large binaries (firmware / WASM emulator)
+*.bin
+*.wasm

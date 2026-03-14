@@ -3,6 +3,18 @@
 import { useState } from 'react'
 import { ScrollArea } from '@/app/components/ui/scroll-area'
 import { Badge } from '@/app/components/ui/badge'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from '@/app/components/ui/card'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger
+} from '@/app/components/ui/collapsible'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import ScreenInspector from './screen-inspector'
 import RunTargetInspector from './run-target-inspector'
@@ -10,17 +22,22 @@ import RunTargetInspector from './run-target-inspector'
 function CollapsibleSection({ title, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="border-t border-line pt-2 mt-2 first:border-t-0 first:mt-0 first:pt-0">
-      <button
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="mt-4 border-t border-line/70 pt-4 first:mt-0 first:border-t-0 first:pt-0"
+    >
+      <CollapsibleTrigger
         type="button"
-        className="w-full flex items-center gap-1.5 px-2 py-1 rounded text-left text-xs font-semibold text-ink hover:bg-white/[0.06] transition-colors"
-        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-none border border-transparent px-2.5 py-2 text-left font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-ink transition-colors hover:border-line/60 hover:bg-panel-soft/70"
       >
         {open ? <ChevronDown className="size-3 text-ink-dim" /> : <ChevronRight className="size-3 text-ink-dim" />}
         <span>{title}</span>
-      </button>
-      {open && <div className="pt-2">{children}</div>}
-    </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pt-3">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -48,14 +65,26 @@ export default function InspectorPanel({
   }
 
   return (
-    <aside className="h-full rounded-2xl border border-line bg-panel/95 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm flex flex-col min-h-0 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-line">
-        <span className="text-[10px] text-ink-dim uppercase tracking-wider font-medium">
-          {selectedScreen ? 'Inspector' : 'Logic Node'}
-        </span>
-      </div>
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="p-3">
+    <Card className="flex h-full min-h-0 flex-col overflow-hidden border-line/80 bg-card shadow-none">
+      <CardHeader className="gap-2 border-b border-line/70 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle className="text-ink">
+              {selectedScreen ? '[ Screen Inspector ]' : '[ Logic Node ]'}
+            </CardTitle>
+            <CardDescription>
+              {selectedScreen
+                ? 'Edit the selected screen and inspect linked actions.'
+                : 'Inspect the selected workflow target and inbound links.'}
+            </CardDescription>
+          </div>
+          <Badge variant="outline" className="border-line/80 bg-panel-soft text-[10px] text-ink-dim">
+            {selectedNodeId}
+          </Badge>
+        </div>
+      </CardHeader>
+      <ScrollArea className="min-h-0 flex-1">
+        <CardContent className="p-4">
           {selectedScreen && (
             <ScreenInspector
               selectedScreen={selectedScreen}
@@ -95,8 +124,8 @@ export default function InspectorPanel({
               </div>
             ))}
           </CollapsibleSection>
-        </div>
+        </CardContent>
       </ScrollArea>
-    </aside>
+    </Card>
   )
 }
