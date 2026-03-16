@@ -22,6 +22,7 @@ Phone PKJS handles state, can call OpenAI directly, and sends compact UI schema 
 - Message keys: [package.json](/Users/sam/dev/pebble/pebble-stewie/package.json)
 - Screen authoring guide: [SCREEN_SCHEMA_GUIDE.md](/Users/sam/dev/pebble/pebble-stewie/docs/SCREEN_SCHEMA_GUIDE.md)
 - SDUI import/export spec: [docs/SDUI_SCHEMA_SPEC.md](/Users/sam/dev/pebble/pebble-stewie/docs/SDUI_SCHEMA_SPEC.md)
+- Pebble design-language notes: [docs/PEBBLE_DESIGN_LANGUAGE.md](/Users/sam/dev/pebble/pebble-stewie/docs/PEBBLE_DESIGN_LANGUAGE.md)
 - UI support roadmap: [docs/UI_SUPPORT_PLAN.md](/Users/sam/dev/pebble/pebble-stewie/docs/UI_SUPPORT_PLAN.md)
 - Shared schema contract: [packages/sdui-contract](/Users/sam/dev/pebble/pebble-stewie/packages/sdui-contract)
 - Web builder scaffold: [apps/screen-builder-web](/Users/sam/dev/pebble/pebble-stewie/apps/screen-builder-web)

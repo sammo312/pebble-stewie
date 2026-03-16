@@ -1,14 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { applyNodeChanges, useNodesState, useEdgesState } from 'reactflow'
 import { ACTION_TYPES } from '../pebble-protocol'
 import {
-  constants,
+  schemaRegistry,
   builderElements,
   graphSchema,
   bindingPresets,
-  RUN_TARGETS,
   isRunTargetId,
   getRunTargetDefinition,
   screenUsesButtonSlots,
@@ -18,18 +17,24 @@ import {
   createDefaultGraph
 } from '../lib/constants'
 import {
+  sanitizeId,
   ensureUniqueScreenId,
   ensureUniqueEntityId,
   getNestedValue,
   setNestedValue,
   pruneRunForType,
+  updateRunField,
   updateEntityField,
   toPrettyJson,
   shortHash,
   isRunConfigured,
   countUnmappedEntities,
+  getScreenHookRuns,
   collectRequiredRunTargetIds,
   collectNodeUsages,
+  collectGraphReferenceCatalog,
+  inferBuilderMetaFromGraph,
+  compileVariableDefaults,
   computeAutoPosition,
   buildGraphEdges,
   buildGraphNodes,
@@ -39,18 +44,40 @@ import {
   PREVIEW_PLACEHOLDER_ID,
   createPreviewRenderScreen,
   createPreviewPlaceholderScreen,
-  createVoicePreviewScreen,
+  renderPreviewValueTemplate,
   getMenuItemFromPreviewAction,
   getMenuActionFromPreviewAction
 } from '../lib/preview-utils'
+import {
+  clampDrawStepCount,
+  coerceDrawNumber,
+  compileMotionToDrawing,
+  createDefaultCanvas,
+  createDefaultCanvasMotion,
+  createDefaultDrawing,
+  createDefaultMotion,
+  createDefaultMotionTrack,
+  createDefaultDrawStep,
+  getDrawStepFieldLimit,
+  isDrawStepNumericField,
+  normalizeCanvas,
+  normalizeMotion
+} from '../lib/draw-utils'
+import { GRAPH_TEMPLATES } from '../lib/graph-templates'
 
 export default function useGraphEditor() {
   const [graph, setGraph] = useState(createDefaultGraph)
   const [selectedScreenId, setSelectedScreenId] = useState('root')
+  const selectedScreenIdRef = useRef(selectedScreenId)
+  selectedScreenIdRef.current = selectedScreenId
   const [selectedNodeId, setSelectedNodeId] = useState('')
   const [previewScreenId, setPreviewScreenId] = useState('root')
   const [previewPlaceholderScreen, setPreviewPlaceholderScreen] = useState(null)
   const [previewHistory, setPreviewHistory] = useState([])
+  const [previewVars, setPreviewVars] = useState({})
+  const [previewStorage, setPreviewStorage] = useState({})
+  const [previewTimerDeadline, setPreviewTimerDeadline] = useState(null)
+  const [previewTimerNow, setPreviewTimerNow] = useState(() => Date.now())
   const [importText, setImportText] = useState(() => JSON.stringify(createDefaultGraph(), null, 2))
   const [notice, setNotice] = useState({ type: 'idle', text: 'Ready' })
   const [bindingsDraftByScreen, setBindingsDraftByScreen] = useState({})
@@ -62,8 +89,12 @@ export default function useGraphEditor() {
   const [nodes, setNodes] = useNodesState([])
   const [edges, setEdges] = useEdgesState([])
   const [showImportExport, setShowImportExport] = useState(false)
+  const schemaVersions = useMemo(() => schemaRegistry.listSchemaVersions(), [])
 
-  const normalizedGraph = useMemo(() => graphSchema.normalizeCanonicalGraph(graph), [graph])
+  const normalizedGraph = useMemo(() => {
+    const withDefaults = compileVariableDefaults(graph)
+    return graphSchema.normalizeCanonicalGraph(withDefaults)
+  }, [graph])
   const graphBuilderSpec = useMemo(() => builderElements.deriveBuilderSpecFromGraph(graph), [graph])
 
   const selectedScreen = selectedNodeId && !isRunTargetId(selectedNodeId) ? graph.screens[selectedNodeId] || null : null
@@ -74,8 +105,8 @@ export default function useGraphEditor() {
       : graph.screens[previewScreenId] || null
   const selectedScreenType = selectedScreen ? String(selectedScreen.type || 'menu') : 'menu'
   const screenBuilderSpec = useMemo(
-    () => builderElements.deriveBuilderSpecForScreen(selectedScreenType),
-    [selectedScreenType]
+    () => builderElements.deriveBuilderSpecForScreen(selectedScreenType, graph.schemaVersion),
+    [graph.schemaVersion, selectedScreenType]
   )
   const screenIds = Object.keys(graph.screens)
   const unmappedCount = useMemo(() => countUnmappedEntities(graph), [graph])
@@ -88,6 +119,10 @@ export default function useGraphEditor() {
     () => collectNodeUsages(graph, selectedNodeId),
     [graph, selectedNodeId]
   )
+  const graphReferenceCatalog = useMemo(
+    () => collectGraphReferenceCatalog(graph, selectedScreenId),
+    [graph, selectedScreenId]
+  )
 
   const normalizedExportText = normalizedGraph ? JSON.stringify(normalizedGraph, null, 2) : ''
   const canExport = !!normalizedGraph
@@ -96,9 +131,27 @@ export default function useGraphEditor() {
     [graph, normalizedExportText]
   )
   const previewRenderedScreen = useMemo(
-    () => createPreviewRenderScreen(previewScreen, previewRevision),
-    [previewScreen, previewRevision]
+    () => createPreviewRenderScreen(
+      previewScreen,
+      previewRevision,
+      previewVars,
+      previewStorage,
+      { remaining: Math.max(0, previewTimerDeadline ? Math.ceil((previewTimerDeadline - previewTimerNow) / 1000) : 0) }
+    ),
+    [previewScreen, previewRevision, previewVars, previewStorage, previewTimerDeadline, previewTimerNow]
   )
+
+  function buildCompiledMotionState(rawMotion, rawCanvas) {
+    const canvas = normalizeCanvas(rawCanvas)
+    const motion = normalizeMotion(
+      rawMotion || (canvas.template === 'header_list' ? createDefaultCanvasMotion(canvas) : createDefaultMotion())
+    )
+    return {
+      canvas,
+      motion,
+      drawing: compileMotionToDrawing(motion, canvas)
+    }
+  }
 
   // --- Callbacks ---
 
@@ -210,6 +263,51 @@ export default function useGraphEditor() {
   }, [graph, previewScreenId])
 
   useEffect(() => {
+    let nextVars = {}
+    let nextStorage = {}
+
+    const entryId = previewScreenId !== PREVIEW_PLACEHOLDER_ID ? previewScreenId : graph.entryScreenId
+    const entryScreen = graph.screens[entryId]
+    if (entryScreen && Array.isArray(entryScreen.onEnter) && entryScreen.onEnter.length > 0) {
+      const result = executePreviewHookSequence(entryScreen.onEnter, entryScreen, nextVars, nextStorage)
+      nextVars = result.vars
+      nextStorage = result.storage
+    }
+
+    setPreviewVars(nextVars)
+    setPreviewStorage(nextStorage)
+    setPreviewTimerDeadline(null)
+    setPreviewTimerNow(Date.now())
+  }, [previewRevision])
+
+  useEffect(() => {
+    if (!previewTimerDeadline) {
+      return undefined
+    }
+
+    const intervalId = window.setInterval(() => {
+      setPreviewTimerNow(Date.now())
+    }, 250)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [previewTimerDeadline])
+
+  useEffect(() => {
+    if (!previewTimerDeadline || previewScreenId === PREVIEW_PLACEHOLDER_ID || !previewScreen?.timer?.run) {
+      return
+    }
+
+    if (previewTimerNow < previewTimerDeadline) {
+      return
+    }
+
+    setPreviewTimerDeadline(null)
+    runPreviewAction(previewScreen.timer.run, 'screen timer', previewScreen)
+  }, [previewScreen, previewScreenId, previewTimerDeadline, previewTimerNow])
+
+  useEffect(() => {
     const nextNodes = buildGraphNodes(
       graph,
       normalizedGraph,
@@ -223,7 +321,7 @@ export default function useGraphEditor() {
       }
     )
     setNodes(nextNodes)
-  }, [activeRunTargetIds, graph, handleAddDrawerItemFromGraph, handleAddMenuItemFromGraph, layoutTick, normalizedGraph, runTargetPositions, selectedNodeId, setNodes])
+  }, [activeRunTargetIds, graph, handleAddDrawerItemFromGraph, handleAddMenuItemFromGraph, layoutTick, nodePositions, normalizedGraph, runTargetPositions, selectedNodeId, setNodes])
 
   useEffect(() => {
     setEdges(buildGraphEdges(graph, { focusedNodeId: selectedNodeId }))
@@ -295,7 +393,42 @@ export default function useGraphEditor() {
       })
     }
 
+    if (target.runType === 'set_var') {
+      return pruneRunForType('set_var', {
+        ...existingRun,
+        type: 'set_var',
+        key: existingRun.key || 'count',
+        value: existingRun.value || 'increment'
+      })
+    }
+
+    if (target.runType === 'store') {
+      return pruneRunForType('store', {
+        ...existingRun,
+        type: 'store',
+        key: existingRun.key || 'high_score',
+        value: existingRun.value || '{{var.count}}'
+      })
+    }
+
     return null
+  }
+
+  function createDefaultScreenHookRun() {
+    return pruneRunForType('effect', {
+      type: 'effect',
+      vibe: 'short'
+    })
+  }
+
+  function createDefaultScreenTimer() {
+    return {
+      durationMs: 5000,
+      run: pruneRunForType('effect', {
+        type: 'effect',
+        vibe: 'short'
+      })
+    }
   }
 
   function describeCanvasTarget(targetId) {
@@ -317,8 +450,9 @@ export default function useGraphEditor() {
   }
 
   function updateSelectedScreen(mutator) {
+    const id = selectedScreenIdRef.current
     setGraph((prev) => {
-      const screen = prev.screens[selectedScreenId]
+      const screen = prev.screens[id]
       if (!screen) {
         return prev
       }
@@ -328,7 +462,7 @@ export default function useGraphEditor() {
         ...prev,
         screens: {
           ...prev.screens,
-          [selectedScreenId]: nextScreen
+          [id]: nextScreen
         }
       }
     })
@@ -356,12 +490,18 @@ export default function useGraphEditor() {
       return
     }
 
+    const target = getRunTargetDefinition(targetId)
+    if (!target || !graphBuilderSpec.enums.runTypes.includes(target.runType)) {
+      setNotice({ type: 'error', text: `Run target not supported by ${graph.schemaVersion}` })
+      return
+    }
+
     if (options.position) {
       setRunTargetPositions((prev) => ({ ...prev, [targetId]: options.position }))
     }
     setVisibleRunTargetIds((prev) => (prev.includes(targetId) ? prev : prev.concat(targetId)))
     setSelectedNodeId(targetId)
-    setNotice({ type: 'success', text: `Added ${getRunTargetDefinition(targetId)?.title || 'logic node'} to canvas` })
+    setNotice({ type: 'success', text: `Added ${target.title || 'logic node'} to canvas` })
     setTimeout(() => flowInstance?.fitView({ padding: 0.22, duration: 250 }), 10)
   }
 
@@ -379,7 +519,7 @@ export default function useGraphEditor() {
     }
   }
 
-  function clearLinkByHandle(sourceScreenId, sourceHandle) {
+  const clearLinkByHandle = useCallback(function clearLinkByHandle(sourceScreenId, sourceHandle) {
     let removed = false
 
     setGraph((prev) => {
@@ -415,13 +555,15 @@ export default function useGraphEditor() {
         }
       }
 
-      if (sourceHandle.startsWith('action-')) {
-        const key = sourceHandle.slice('action-'.length)
+      if (sourceHandle.startsWith('action-') || sourceHandle.startsWith('slot-')) {
+        const isSlot = sourceHandle.startsWith('slot-')
+        const key = isSlot ? sourceHandle.slice('slot-'.length) : sourceHandle.slice('action-'.length)
         const actions = getScreenActions(screen)
         const nextActions = actions.map((action, idx) => {
-          const matchId = action.id ? String(action.id) === key : false
-          const matchIndex = !action.id && String(idx) === key
-          if (!matchId && !matchIndex) {
+          const match = isSlot
+            ? action.slot === key
+            : (action.id ? String(action.id) === key : String(idx) === key)
+          if (!match) {
             return action
           }
           removed = !!action.run
@@ -442,13 +584,48 @@ export default function useGraphEditor() {
         }
       }
 
+      if (sourceHandle.startsWith('hook-')) {
+        const parts = sourceHandle.slice('hook-'.length).split('-')
+        const hookKey = parts[0]
+        const hookIndex = parseInt(parts[1], 10)
+        const hooks = Array.isArray(screen[hookKey]) ? [...screen[hookKey]] : []
+        if (hooks[hookIndex]) {
+          removed = true
+          hooks.splice(hookIndex, 1)
+          return {
+            ...prev,
+            screens: {
+              ...prev.screens,
+              [sourceScreenId]: {
+                ...screen,
+                [hookKey]: hooks
+              }
+            }
+          }
+        }
+      }
+
+      if (sourceHandle === 'timer-run' && screen.timer) {
+        removed = true
+        return {
+          ...prev,
+          screens: {
+            ...prev.screens,
+            [sourceScreenId]: {
+              ...screen,
+              timer: { ...screen.timer, run: null }
+            }
+          }
+        }
+      }
+
       return prev
     })
 
     if (removed) {
       setNotice({ type: 'success', text: `Removed link from ${sourceHandle}` })
     }
-  }
+  }, [setGraph, setNotice])
 
   const handleEdgesDelete = useCallback((deletedEdges) => {
     ;(deletedEdges || []).forEach((edge) => {
@@ -456,26 +633,283 @@ export default function useGraphEditor() {
         clearLinkByHandle(edge.data.source, edge.data.sourceHandle)
       }
     })
-  }, [])
+  }, [clearLinkByHandle])
+
+  function applyPreviewScreenState(screenId, options = {}) {
+    setPreviewPlaceholderScreen(null)
+    setPreviewScreenId(screenId)
+    if (Object.prototype.hasOwnProperty.call(options, 'nextTimerDeadline')) {
+      setPreviewTimerNow(Date.now())
+      setPreviewTimerDeadline(options.nextTimerDeadline)
+    }
+
+    const historySourceId = options.historySourceId || previewScreenId
+    if (options.resetHistory) {
+      setPreviewHistory([])
+    } else if (options.pushHistory && historySourceId && historySourceId !== screenId) {
+      setPreviewHistory((prev) => prev.concat(historySourceId))
+    }
+  }
+
+  function normalizePreviewVarKey(rawKey) {
+    return String(rawKey || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '_')
+      .replace(/^_+/, '')
+      .replace(/_+$/, '')
+  }
+
+  function parsePreviewConditionValue(rawValue) {
+    const text = String(rawValue ?? '').trim()
+    if (!text) {
+      return ''
+    }
+    if (text === 'true') {
+      return true
+    }
+    if (text === 'false') {
+      return false
+    }
+    if (/^-?\d+(\.\d+)?$/.test(text)) {
+      return Number(text)
+    }
+    return text
+  }
+
+  function evaluatePreviewCondition(condition, vars) {
+    if (!condition || typeof condition !== 'object') {
+      return true
+    }
+
+    const key = normalizePreviewVarKey(condition.var)
+    const op = String(condition.op || '').toLowerCase()
+    if (!key || !op) {
+      return false
+    }
+
+    const left = vars[key]
+    const right = parsePreviewConditionValue(condition.value)
+    const leftNumber = Number(left)
+    const rightNumber = Number(right)
+    const numbersComparable = Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+
+    if (op === 'eq') {
+      return String(left ?? '') === String(right ?? '')
+    }
+    if (op === 'neq') {
+      return String(left ?? '') !== String(right ?? '')
+    }
+    if (!numbersComparable) {
+      return false
+    }
+    if (op === 'gt') {
+      return leftNumber > rightNumber
+    }
+    if (op === 'gte') {
+      return leftNumber >= rightNumber
+    }
+    if (op === 'lt') {
+      return leftNumber < rightNumber
+    }
+    if (op === 'lte') {
+      return leftNumber <= rightNumber
+    }
+
+    return false
+  }
+
+  function applyPreviewVarMutationToState(run, vars) {
+    const key = normalizePreviewVarKey(run?.key)
+    const valueSpec = String(run?.value || '').trim()
+    if (!key || !valueSpec) {
+      return null
+    }
+
+    const nextVars = { ...(vars || {}) }
+    const current = nextVars[key]
+    let nextValue = valueSpec
+
+    if (valueSpec === 'increment') {
+      const numeric = Number(current)
+      nextValue = Number.isFinite(numeric) ? numeric + 1 : 1
+    } else if (valueSpec === 'decrement') {
+      const numeric = Number(current)
+      nextValue = Number.isFinite(numeric) ? numeric - 1 : -1
+    } else if (valueSpec === 'toggle') {
+      nextValue = !(current === true || String(current).toLowerCase() === 'true')
+    } else if (valueSpec.indexOf('literal:') === 0) {
+      nextValue = valueSpec.slice('literal:'.length)
+    } else if (valueSpec === 'true') {
+      nextValue = true
+    } else if (valueSpec === 'false') {
+      nextValue = false
+    } else if (/^-?\d+(\.\d+)?$/.test(valueSpec)) {
+      nextValue = Number(valueSpec)
+    }
+
+    nextVars[key] = nextValue
+    return nextVars
+  }
+
+  function applyPreviewVarMutation(run) {
+    const nextVars = applyPreviewVarMutationToState(run, previewVars)
+    if (!nextVars) {
+      return false
+    }
+    setPreviewVars(nextVars)
+    return true
+  }
+
+  function applyPreviewStorageMutationToState(run, sourceScreen, vars, storage) {
+    const key = normalizePreviewVarKey(run?.key)
+    const valueSpec = String(run?.value || '').trim()
+    if (!key || !valueSpec) {
+      return null
+    }
+
+    const resolvedValue = renderPreviewValueTemplate(valueSpec, sourceScreen, vars, storage)
+    return {
+      ...(storage || {}),
+      [key]: String(resolvedValue ?? '')
+    }
+  }
+
+  function applyPreviewStorageMutation(run, sourceScreen) {
+    const nextStorage = applyPreviewStorageMutationToState(run, sourceScreen, previewVars, previewStorage)
+    if (!nextStorage) {
+      return false
+    }
+    setPreviewStorage(nextStorage)
+    return true
+  }
+
+  function executePreviewHookRun(run, sourceScreen, vars, storage) {
+    if (!run || !run.type) {
+      return { vars, storage, redirect: '' }
+    }
+
+    if (run.type === 'navigate') {
+      if (!evaluatePreviewCondition(run.condition, vars)) {
+        return { vars, storage, redirect: '' }
+      }
+      return {
+        vars,
+        storage,
+        redirect: run.screen || ''
+      }
+    }
+
+    if (run.type === 'set_var') {
+      const nextVars = applyPreviewVarMutationToState(run, vars)
+      return {
+        vars: nextVars || vars,
+        storage,
+        redirect: ''
+      }
+    }
+
+    if (run.type === 'store') {
+      const nextStorage = applyPreviewStorageMutationToState(run, sourceScreen, vars, storage)
+      return {
+        vars,
+        storage: nextStorage || storage,
+        redirect: ''
+      }
+    }
+
+    if (run.type === 'effect') {
+      return { vars, storage, redirect: '' }
+    }
+
+    return { vars, storage, redirect: '' }
+  }
+
+  function executePreviewHookSequence(runs, sourceScreen, vars, storage) {
+    let nextVars = { ...(vars || {}) }
+    let nextStorage = { ...(storage || {}) }
+    let redirect = ''
+
+    ;(runs || []).forEach((run) => {
+      const result = executePreviewHookRun(run, sourceScreen, nextVars, nextStorage)
+      nextVars = result.vars
+      nextStorage = result.storage
+      if (result.redirect) {
+        redirect = result.redirect
+      }
+    })
+
+    return {
+      vars: nextVars,
+      storage: nextStorage,
+      redirect
+    }
+  }
 
   function jumpPreviewTo(screenId, options = {}) {
     if (!screenId || !graph.screens[screenId]) {
       return false
     }
 
-    setPreviewPlaceholderScreen(null)
-    setPreviewScreenId(screenId)
+    let targetScreenId = screenId
+    let nextVars = { ...previewVars }
+    let nextStorage = { ...previewStorage }
+    const shouldRunLifecycle = options.runLifecycle !== false
+    const sourceScreen =
+      options.sourceScreen ||
+      (previewScreenId !== PREVIEW_PLACEHOLDER_ID ? graph.screens[previewScreenId] || null : null)
 
-    if (options.resetHistory) {
-      setPreviewHistory([])
-    } else if (options.pushHistory && previewScreenId && previewScreenId !== screenId) {
-      setPreviewHistory((prev) => prev.concat(previewScreenId))
+    if (sourceScreen && sourceScreen.id === targetScreenId && !options.forceLifecycle) {
+      applyPreviewScreenState(targetScreenId, options)
+      return true
     }
 
+    if (shouldRunLifecycle && sourceScreen && sourceScreen.id !== targetScreenId) {
+      const exitResult = executePreviewHookSequence(sourceScreen.onExit, sourceScreen, nextVars, nextStorage)
+      nextVars = exitResult.vars
+      nextStorage = exitResult.storage
+      if (exitResult.redirect) {
+        targetScreenId = exitResult.redirect
+      }
+    }
+
+    let depth = 0
+    while (shouldRunLifecycle && depth < 8) {
+      const nextScreen = graph.screens[targetScreenId]
+      if (!nextScreen) {
+        return false
+      }
+
+      const enterResult = executePreviewHookSequence(nextScreen.onEnter, nextScreen, nextVars, nextStorage)
+      nextVars = enterResult.vars
+      nextStorage = enterResult.storage
+      if (enterResult.redirect && enterResult.redirect !== targetScreenId) {
+        targetScreenId = enterResult.redirect
+        depth += 1
+        continue
+      }
+      break
+    }
+
+    if (depth >= 8) {
+      return false
+    }
+
+    const targetScreen = graph.screens[targetScreenId]
+    const nextTimerDeadline =
+      targetScreen?.timer && (sourceScreen?.id !== targetScreenId || options.forceLifecycle)
+        ? Date.now() + Math.max(100, Number(targetScreen.timer.durationMs || 5000))
+        : sourceScreen?.id === targetScreenId
+          ? previewTimerDeadline
+          : null
+
+    setPreviewVars(nextVars)
+    setPreviewStorage(nextStorage)
+    applyPreviewScreenState(targetScreenId, { ...options, nextTimerDeadline })
     return true
   }
 
-  function runPreviewAction(run, sourceLabel) {
+  function runPreviewAction(run, sourceLabel, sourceScreen = previewScreen) {
     if (!run || !run.type) {
       return
     }
@@ -493,13 +927,35 @@ export default function useGraphEditor() {
     }
 
     if (run.type === 'navigate') {
+      if (!evaluatePreviewCondition(run.condition, previewVars)) {
+        setNotice({ type: 'idle', text: `Preview condition blocked ${sourceLabel}` })
+        return
+      }
       if (previewScreenId === PREVIEW_PLACEHOLDER_ID) {
         setPreviewHistory((prev) => prev.slice(0, -1))
       }
-      if (jumpPreviewTo(run.screen, { pushHistory: previewScreenId !== PREVIEW_PLACEHOLDER_ID })) {
+      if (jumpPreviewTo(run.screen, { pushHistory: previewScreenId !== PREVIEW_PLACEHOLDER_ID, forceLifecycle: true })) {
         setNotice({ type: 'success', text: `Preview navigated via ${sourceLabel}` })
       } else {
         setNotice({ type: 'error', text: `Preview target "${run.screen}" is missing` })
+      }
+      return
+    }
+
+    if (run.type === 'set_var') {
+      if (applyPreviewVarMutation(run)) {
+        setNotice({ type: 'success', text: `Preview updated ${run.key}` })
+      } else {
+        setNotice({ type: 'error', text: 'Preview variable update is incomplete' })
+      }
+      return
+    }
+
+    if (run.type === 'store') {
+      if (applyPreviewStorageMutation(run, sourceScreen)) {
+        setNotice({ type: 'success', text: `Preview stored ${run.key}` })
+      } else {
+        setNotice({ type: 'error', text: 'Preview storage update is incomplete' })
       }
       return
     }
@@ -528,24 +984,16 @@ export default function useGraphEditor() {
       }
       const previousScreenId = previewHistory[previewHistory.length - 1]
       setPreviewHistory((prev) => prev.slice(0, -1))
-      setPreviewPlaceholderScreen(null)
-      setPreviewScreenId(previousScreenId)
-      setNotice({ type: 'success', text: `Preview returned to "${previousScreenId}"` })
+      if (jumpPreviewTo(previousScreenId, { historySourceId: previewScreenId, sourceScreen: previewScreen, forceLifecycle: true })) {
+        setNotice({ type: 'success', text: `Preview returned to "${previousScreenId}"` })
+      } else {
+        setNotice({ type: 'error', text: `Preview target "${previousScreenId}" is missing` })
+      }
       return
     }
 
     if (action.type === ACTION_TYPES.VOICE) {
-      const originScreenId =
-        action.screenId && action.screenId !== PREVIEW_PLACEHOLDER_ID
-          ? action.screenId
-          : previewScreenId !== PREVIEW_PLACEHOLDER_ID
-            ? previewScreenId
-            : previewHistory[previewHistory.length - 1]
-
-      setPreviewHistory((prev) => (originScreenId ? prev.concat(originScreenId) : prev))
-      setPreviewPlaceholderScreen(createVoicePreviewScreen(action, originScreenId))
-      setPreviewScreenId(PREVIEW_PLACEHOLDER_ID)
-      setNotice({ type: 'success', text: 'Preview opened voice result' })
+      setNotice({ type: 'success', text: 'Dictation result received (preview only)' })
       return
     }
 
@@ -565,7 +1013,7 @@ export default function useGraphEditor() {
     if (sourceScreen.type === 'menu') {
       const menuAction = getMenuActionFromPreviewAction(action, sourceScreen)
       if (menuAction) {
-        runPreviewAction(menuAction.run, menuAction.label || menuAction.id || 'action menu item')
+        runPreviewAction(menuAction.run, menuAction.label || menuAction.id || 'action menu item', sourceScreen)
         return
       }
 
@@ -574,7 +1022,7 @@ export default function useGraphEditor() {
         setNotice({ type: 'error', text: 'Preview select did not match a menu item or action-menu item' })
         return
       }
-      runPreviewAction(item.run, item.label || item.id || 'menu item')
+      runPreviewAction(item.run, item.label || item.id || 'menu item', sourceScreen)
       return
     }
 
@@ -588,7 +1036,7 @@ export default function useGraphEditor() {
       return
     }
 
-    runPreviewAction(selectedAction.run, selectedAction.label || selectedAction.id || 'screen action')
+    runPreviewAction(selectedAction.run, selectedAction.label || selectedAction.id || 'screen action', sourceScreen)
   }
 
   const handleToSlot = {
@@ -866,7 +1314,12 @@ export default function useGraphEditor() {
 
     if (field.id === 'type') {
       const val = String(rawValue || 'menu').toLowerCase()
-      const nextType = val === 'card' ? 'card' : val === 'scroll' ? 'scroll' : 'menu'
+      const nextType =
+        val === 'card' ? 'card' : val === 'scroll' ? 'scroll' : val === 'draw' ? 'draw' : 'menu'
+      if (!graphBuilderSpec.enums.screenTypes.includes(nextType)) {
+        setNotice({ type: 'error', text: `Screen type not supported by ${graph.schemaVersion}` })
+        return
+      }
       updateSelectedScreen((screen) => {
         const next = {
           ...screen,
@@ -879,13 +1332,33 @@ export default function useGraphEditor() {
 
         if (nextType === 'menu') {
           next.items = Array.isArray(screen.items) ? screen.items : []
+          delete next.drawing
+          delete next.motion
+          delete next.canvas
           delete next.actions
         } else if (nextType === 'card') {
           next.actions = getScreenActions(screen)
+          delete next.drawing
+          delete next.motion
+          delete next.canvas
+          delete next.items
+        } else if (nextType === 'scroll') {
+          next.actions = getScreenActions(screen)
+          delete next.drawing
+          delete next.motion
+          delete next.canvas
           delete next.items
         } else {
-          next.actions = getScreenActions(screen)
+          const baseCanvas = screen.canvas || createDefaultCanvas({ header: screen.title || 'New Draw' })
+          const compiled = buildCompiledMotionState(screen.motion, baseCanvas)
+          next.canvas = compiled.canvas
+          next.motion = compiled.motion
+          next.drawing = compiled.drawing
+          if (!next.body && !next.bodyTemplate) {
+            next.body = 'Animated drawing'
+          }
           delete next.items
+          delete next.actions
         }
 
         return next
@@ -904,7 +1377,7 @@ export default function useGraphEditor() {
         ? typedValue.slice(0, field.maxLen)
         : typedValue
 
-    updateSelectedScreen((screen) => setNestedValue(screen, field.id, limitedValue))
+    updateSelectedScreen((screen) => updateEntityField(screen, field.id, limitedValue))
   }
 
   function getBindingsDraft() {
@@ -947,7 +1420,11 @@ export default function useGraphEditor() {
   }
 
   function applyBindingsPreset(rawValue) {
-    const preset = (bindingPresets.find((presetItem) => presetItem.id === rawValue) || {}).value || ''
+    const availablePresets = bindingPresets.filter((presetItem) => {
+      const requiredRunTypes = presetItem.requiresRunTypes || []
+      return requiredRunTypes.every((runType) => graphBuilderSpec.enums.runTypes.includes(runType))
+    })
+    const preset = (availablePresets.find((presetItem) => presetItem.id === rawValue) || {}).value || ''
 
     if (!preset) {
       setBindingsDraftByScreen((prev) => ({ ...prev, [selectedScreenId]: '' }))
@@ -967,21 +1444,79 @@ export default function useGraphEditor() {
     }
   }
 
+  function ensureCurrentScreenBinding(preferredKey, bindingConfig) {
+    if (!selectedScreen || !bindingConfig || typeof bindingConfig !== 'object') {
+      return ''
+    }
+
+    const source = String(bindingConfig.source || '')
+    let resolvedKey = ''
+    let nextDraft = ''
+
+    updateSelectedScreen((screen) => {
+      const nextBindings = screen.bindings && typeof screen.bindings === 'object'
+        ? { ...screen.bindings }
+        : {}
+
+      if (source) {
+        const existingKey = Object.keys(nextBindings).find((key) => String(nextBindings[key]?.source || '') === source)
+        if (existingKey) {
+          resolvedKey = existingKey
+          nextDraft = toPrettyJson(nextBindings)
+          return screen
+        }
+      }
+
+      const baseKey = sanitizeId(preferredKey || 'data', 'data')
+      let candidate = baseKey
+      let index = 2
+      while (nextBindings[candidate]) {
+        candidate = `${baseKey}_${index}`
+        index += 1
+      }
+
+      nextBindings[candidate] = { ...bindingConfig }
+      resolvedKey = candidate
+      nextDraft = toPrettyJson(nextBindings)
+      return {
+        ...screen,
+        bindings: nextBindings
+      }
+    })
+
+    if (nextDraft) {
+      setBindingsDraftByScreen((prev) => ({ ...prev, [selectedScreenId]: nextDraft }))
+    }
+
+    return resolvedKey
+  }
+
   function addScreen(kind, options = {}) {
-    const requestedType = kind === 'card' ? 'card' : kind === 'scroll' ? 'scroll' : 'menu'
-    const titles = { menu: 'New Menu', card: 'New Card', scroll: 'New Scroll' }
+    const requestedType =
+      kind === 'card' ? 'card' : kind === 'scroll' ? 'scroll' : kind === 'draw' ? 'draw' : 'menu'
+    if (!graphBuilderSpec.enums.screenTypes.includes(requestedType)) {
+      setNotice({ type: 'error', text: `Screen type not supported by ${graph.schemaVersion}` })
+      return
+    }
+    const titles = { menu: 'New Menu', card: 'New Card', scroll: 'New Scroll', draw: 'New Draw' }
     const nextId = ensureUniqueScreenId(graph, 'screen', '')
     const nextScreen = {
       id: nextId,
       type: requestedType,
       title: titles[requestedType] || 'New Screen',
-      body: '',
+      body: requestedType === 'draw' ? 'Animated drawing' : '',
       titleTemplate: '',
       bodyTemplate: '',
       bindings: null,
       input: { mode: 'menu' },
       items: requestedType === 'menu' ? [] : undefined,
-      actions: requestedType === 'scroll' || requestedType === 'card' ? [] : undefined
+      actions: requestedType === 'scroll' || requestedType === 'card' ? [] : undefined,
+      ...(requestedType === 'draw'
+        ? buildCompiledMotionState(
+            createDefaultCanvasMotion(createDefaultCanvas({ header: titles.draw })),
+            createDefaultCanvas({ header: titles.draw })
+          )
+        : {})
     }
 
     setGraph((prev) => ({
@@ -1148,6 +1683,579 @@ export default function useGraphEditor() {
     })
   }
 
+  function addScreenHook(hookKey) {
+    if (!selectedScreen || (hookKey !== 'onEnter' && hookKey !== 'onExit')) {
+      return
+    }
+
+    if (!(graphBuilderSpec.hookRunFields || []).length) {
+      setNotice({ type: 'error', text: `Lifecycle hooks are not supported by ${graph.schemaVersion}` })
+      return
+    }
+
+    if (getScreenHookRuns(selectedScreen, hookKey).length >= (graphBuilderSpec.limits.maxScreenHooks || 6)) {
+      setNotice({ type: 'error', text: 'Maximum lifecycle hooks reached' })
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const hooks = getScreenHookRuns(screen, hookKey).slice()
+      hooks.push(createDefaultScreenHookRun())
+      return {
+        ...screen,
+        [hookKey]: hooks
+      }
+    })
+  }
+
+  function removeScreenHook(hookKey, index) {
+    updateSelectedScreen((screen) => {
+      const hooks = getScreenHookRuns(screen, hookKey).slice()
+      hooks.splice(index, 1)
+      const next = { ...screen }
+      if (hooks.length) {
+        next[hookKey] = hooks
+      } else {
+        delete next[hookKey]
+      }
+      return next
+    })
+  }
+
+  function updateScreenHook(hookKey, index, field, rawValue) {
+    const value =
+      field.maxLen && typeof rawValue === 'string' ? rawValue.slice(0, field.maxLen) : rawValue
+
+    updateSelectedScreen((screen) => {
+      const hooks = getScreenHookRuns(screen, hookKey).slice()
+      const currentRun = hooks[index] || createDefaultScreenHookRun()
+      const nextEntity = updateRunField({ run: currentRun }, field.id, value)
+
+      if (!nextEntity.run) {
+        hooks.splice(index, 1)
+      } else {
+        hooks[index] = nextEntity.run
+      }
+
+      const next = { ...screen }
+      if (hooks.length) {
+        next[hookKey] = hooks
+      } else {
+        delete next[hookKey]
+      }
+      return next
+    })
+  }
+
+  function updateScreenTimer(field, rawValue) {
+    if (!selectedScreen) {
+      return
+    }
+
+    if (!(graphBuilderSpec.timerRunFields || []).length) {
+      setNotice({ type: 'error', text: `Timers are not supported by ${graph.schemaVersion}` })
+      return
+    }
+
+    if (field.id === 'timer.durationMs') {
+      const nextDuration = Math.max(100, Math.min(86400000, Number.parseInt(String(rawValue || '0'), 10) || 5000))
+      updateSelectedScreen((screen) => {
+        const currentTimer = screen.timer || createDefaultScreenTimer()
+        return {
+          ...screen,
+          timer: {
+            ...currentTimer,
+            durationMs: nextDuration
+          }
+        }
+      })
+      return
+    }
+
+    const value =
+      field.maxLen && typeof rawValue === 'string' ? rawValue.slice(0, field.maxLen) : rawValue
+
+    updateSelectedScreen((screen) => {
+      const currentTimer = screen.timer || createDefaultScreenTimer()
+      const nextEntity = updateRunField({ run: currentTimer.run }, field.id, value)
+      if (!nextEntity.run) {
+        const next = { ...screen }
+        delete next.timer
+        return next
+      }
+      return {
+        ...screen,
+        timer: {
+          ...currentTimer,
+          run: nextEntity.run
+        }
+      }
+    })
+  }
+
+  function toggleScreenTimer(enabled) {
+    if (!selectedScreen) {
+      return
+    }
+
+    if (enabled && !(graphBuilderSpec.timerRunFields || []).length) {
+      setNotice({ type: 'error', text: `Timers are not supported by ${graph.schemaVersion}` })
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      if (!enabled) {
+        const next = { ...screen }
+        delete next.timer
+        return next
+      }
+
+      return {
+        ...screen,
+        timer: screen.timer || createDefaultScreenTimer()
+      }
+    })
+  }
+
+  function updateMotionField(fieldId, rawValue) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const motion = normalizeMotion(screen.motion || createDefaultMotion())
+      let value = rawValue
+      if (fieldId === 'timelineMs') {
+        value = coerceDrawNumber(rawValue, Number(motion.timelineMs || 1800), 240, 20000)
+      }
+      const compiled = buildCompiledMotionState({
+        ...motion,
+        [fieldId]: value
+      }, screen.canvas)
+
+      return {
+        ...screen,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+  }
+
+  function updateCanvasTemplate(template) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const nextCanvas =
+        String(template || 'freeform') === 'header_list'
+          ? normalizeCanvas(screen.canvas?.template === 'header_list'
+              ? screen.canvas
+              : createDefaultCanvas({ header: screen.title || 'Main Menu' }))
+          : normalizeCanvas({ template: 'freeform' })
+
+      if (!screen.motion) {
+        return {
+          ...screen,
+          canvas: nextCanvas
+        }
+      }
+
+      const compiled = buildCompiledMotionState(
+        nextCanvas.template === 'header_list' ? createDefaultCanvasMotion(nextCanvas) : screen.motion,
+        nextCanvas
+      )
+
+      return {
+        ...screen,
+        canvas: compiled.canvas,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+  }
+
+  function updateCanvasHeader(rawValue) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const canvas = normalizeCanvas(screen.canvas || createDefaultCanvas({ header: screen.title || 'Main Menu' }))
+      const nextCanvas = {
+        ...canvas,
+        header: String(rawValue || '').slice(0, graphBuilderSpec.limits.maxTitleLen || 30)
+      }
+
+      if (!screen.motion) {
+        return {
+          ...screen,
+          canvas: nextCanvas
+        }
+      }
+
+      const compiled = buildCompiledMotionState(screen.motion, nextCanvas)
+      return {
+        ...screen,
+        canvas: compiled.canvas,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+  }
+
+  function addCanvasItem() {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const canvas = normalizeCanvas(screen.canvas || createDefaultCanvas({ header: screen.title || 'Main Menu' }))
+      const items = Array.isArray(canvas.items) ? canvas.items.slice() : []
+      if (items.length >= 4) {
+        return screen
+      }
+
+      const id = ensureUniqueEntityId(items, 'item', 'item')
+      const nextCanvas = {
+        ...canvas,
+        items: items.concat([{ id, label: `Item ${items.length + 1}` }])
+      }
+
+      if (!screen.motion) {
+        return {
+          ...screen,
+          canvas: nextCanvas
+        }
+      }
+
+      const compiled = buildCompiledMotionState(screen.motion, nextCanvas)
+      return {
+        ...screen,
+        canvas: compiled.canvas,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+  }
+
+  function removeCanvasItem(index) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const canvas = normalizeCanvas(screen.canvas || createDefaultCanvas({ header: screen.title || 'Main Menu' }))
+      const items = Array.isArray(canvas.items) ? canvas.items.slice() : []
+      items.splice(index, 1)
+      const nextCanvas = {
+        ...canvas,
+        items
+      }
+
+      if (!screen.motion) {
+        return {
+          ...screen,
+          canvas: nextCanvas
+        }
+      }
+
+      const compiled = buildCompiledMotionState(screen.motion, nextCanvas)
+      return {
+        ...screen,
+        canvas: compiled.canvas,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+  }
+
+  function updateCanvasItem(index, rawValue) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const canvas = normalizeCanvas(screen.canvas || createDefaultCanvas({ header: screen.title || 'Main Menu' }))
+      const items = Array.isArray(canvas.items) ? canvas.items.slice() : []
+      const current = items[index]
+      if (!current) {
+        return screen
+      }
+
+      items[index] = {
+        ...current,
+        label: String(rawValue || '').slice(0, graphBuilderSpec.limits.maxOptionLabelLen || 18)
+      }
+      const nextCanvas = {
+        ...canvas,
+        items
+      }
+
+      if (!screen.motion) {
+        return {
+          ...screen,
+          canvas: nextCanvas
+        }
+      }
+
+      const compiled = buildCompiledMotionState(screen.motion, nextCanvas)
+      return {
+        ...screen,
+        canvas: compiled.canvas,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+  }
+
+  function addMotionTrack() {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    const motion = normalizeMotion(selectedScreen.motion || createDefaultMotion())
+    const tracks = Array.isArray(motion.tracks) ? motion.tracks : []
+    if (tracks.length >= (graphBuilderSpec.limits.maxDrawSteps || 6)) {
+      setNotice({ type: 'error', text: 'Maximum motion tracks reached' })
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const nextMotion = normalizeMotion(screen.motion || createDefaultMotion())
+      const nextTracks = Array.isArray(nextMotion.tracks) ? nextMotion.tracks.slice() : []
+      nextTracks.push(
+        createDefaultMotionTrack(
+          nextTracks,
+          screen.canvas?.template === 'header_list'
+            ? {
+                target: 'items',
+                label: `Items ${nextTracks.length + 1}`,
+                preset: 'slide_left',
+                kind: 'text',
+                placement: 'middle',
+                color: 'ink',
+                fill: true
+              }
+            : undefined
+        )
+      )
+      const compiled = buildCompiledMotionState({
+        ...nextMotion,
+        tracks: nextTracks
+      }, screen.canvas)
+      return {
+        ...screen,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+  }
+
+  function removeMotionTrack(index) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const motion = normalizeMotion(screen.motion || createDefaultMotion())
+      const tracks = Array.isArray(motion.tracks) ? motion.tracks.slice() : []
+      tracks.splice(index, 1)
+      const compiled = buildCompiledMotionState({
+        ...motion,
+        tracks
+      }, screen.canvas)
+      return {
+        ...screen,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+  }
+
+  function updateMotionTrack(index, fieldId, rawValue) {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const motion = normalizeMotion(screen.motion || createDefaultMotion())
+      const tracks = Array.isArray(motion.tracks) ? motion.tracks.slice() : []
+      const current = tracks[index] || createDefaultMotionTrack(tracks)
+      let value = rawValue
+
+      if (fieldId === 'fill') {
+        value = !!rawValue
+      } else if (fieldId === 'id') {
+        const otherTracks = tracks.filter((_, trackIndex) => trackIndex !== index)
+        value = ensureUniqueEntityId(otherTracks, rawValue, current.id || 'track')
+      } else if (fieldId === 'delayMs') {
+        value = coerceDrawNumber(rawValue, Number(current.delayMs || 0), 0, 20000)
+      } else {
+        value = String(rawValue || '')
+      }
+
+      tracks[index] = {
+        ...current,
+        [fieldId]: value
+      }
+      const compiled = buildCompiledMotionState({
+        ...motion,
+        tracks
+      }, screen.canvas)
+
+      return {
+        ...screen,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+  }
+
+  function detachMotionToRaw() {
+    if (!selectedScreen || selectedScreen.type !== 'draw' || !selectedScreen.motion) {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const next = {
+        ...screen,
+        drawing: screen.drawing || createDefaultDrawing()
+      }
+      delete next.motion
+      return next
+    })
+
+    setNotice({ type: 'success', text: 'Detached preset motion to raw steps' })
+  }
+
+  function enablePresetMotion() {
+    if (!selectedScreen || selectedScreen.type !== 'draw') {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const baseMotion =
+        screen.motion ||
+        (screen.canvas?.template === 'header_list'
+          ? createDefaultCanvasMotion(screen.canvas)
+          : createDefaultMotion())
+      const compiled = buildCompiledMotionState(baseMotion, screen.canvas)
+      return {
+        ...screen,
+        motion: compiled.motion,
+        drawing: compiled.drawing
+      }
+    })
+
+    setNotice({ type: 'success', text: 'Preset motion enabled' })
+  }
+
+  function updateDrawField(fieldId, rawValue) {
+    if (!selectedScreen || selectedScreen.type !== 'draw' || selectedScreen.motion) {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const drawing = screen.drawing || createDefaultDrawing()
+      let value = rawValue
+      if (fieldId === 'timelineMs') {
+        value = coerceDrawNumber(rawValue, Number(drawing.timelineMs || 1800), 240, 20000)
+      }
+
+      return {
+        ...screen,
+        drawing: {
+          ...drawing,
+          [fieldId]: value
+        }
+      }
+    })
+  }
+
+  function addDrawStep() {
+    if (!selectedScreen || selectedScreen.type !== 'draw' || selectedScreen.motion) {
+      return
+    }
+
+    const drawing = selectedScreen.drawing || createDefaultDrawing()
+    const steps = Array.isArray(drawing.steps) ? drawing.steps : []
+    if (steps.length >= (graphBuilderSpec.limits.maxDrawSteps || 6)) {
+      setNotice({ type: 'error', text: 'Maximum draw steps reached' })
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const nextDrawing = screen.drawing || createDefaultDrawing()
+      const nextSteps = Array.isArray(nextDrawing.steps) ? nextDrawing.steps.slice() : []
+      nextSteps.push(createDefaultDrawStep(nextSteps))
+      return {
+        ...screen,
+        drawing: {
+          ...nextDrawing,
+          steps: clampDrawStepCount(nextSteps)
+        }
+      }
+    })
+  }
+
+  function removeDrawStep(index) {
+    if (!selectedScreen || selectedScreen.type !== 'draw' || selectedScreen.motion) {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const drawing = screen.drawing || createDefaultDrawing()
+      const steps = Array.isArray(drawing.steps) ? drawing.steps.slice() : []
+      steps.splice(index, 1)
+      return {
+        ...screen,
+        drawing: {
+          ...drawing,
+          steps
+        }
+      }
+    })
+  }
+
+  function updateDrawStep(index, fieldId, rawValue) {
+    if (!selectedScreen || selectedScreen.type !== 'draw' || selectedScreen.motion) {
+      return
+    }
+
+    updateSelectedScreen((screen) => {
+      const drawing = screen.drawing || createDefaultDrawing()
+      const steps = Array.isArray(drawing.steps) ? drawing.steps.slice() : []
+      const current = steps[index] || createDefaultDrawStep(steps)
+      let value = rawValue
+
+      if (fieldId === 'fill') {
+        value = !!rawValue
+      } else if (fieldId === 'id') {
+        const otherSteps = steps.filter((_, stepIndex) => stepIndex !== index)
+        value = ensureUniqueEntityId(otherSteps, rawValue, current.id || 'step')
+      } else if (isDrawStepNumericField(fieldId)) {
+        const { min, max } = getDrawStepFieldLimit(fieldId)
+        value = coerceDrawNumber(rawValue, Number(current[fieldId] || 0), min, max)
+      } else {
+        value = String(rawValue || '')
+      }
+
+      steps[index] = {
+        ...current,
+        [fieldId]: value
+      }
+
+      return {
+        ...screen,
+        drawing: {
+          ...drawing,
+          steps: clampDrawStepCount(steps)
+        }
+      }
+    })
+  }
+
   function handleImport() {
     let parsed
     try {
@@ -1163,6 +2271,12 @@ export default function useGraphEditor() {
     if (!normalized) {
       setNotice({ type: 'error', text: 'Import failed. Payload is not a canonical graph.' })
       return
+    }
+
+    if (candidate._builderMeta) {
+      normalized._builderMeta = candidate._builderMeta
+    } else {
+      normalized._builderMeta = inferBuilderMetaFromGraph(normalized)
     }
 
     setGraph(normalized)
@@ -1181,6 +2295,40 @@ export default function useGraphEditor() {
       onAddDrawerItem: handleAddDrawerItemFromGraph
     }))
     setNotice({ type: 'success', text: 'Imported and normalized successfully' })
+    setTimeout(() => flowInstance?.fitView({ padding: 0.2 }), 10)
+  }
+
+  function loadTemplate(templateId) {
+    const template = GRAPH_TEMPLATES.find((t) => t.id === templateId)
+    if (!template) {
+      setNotice({ type: 'error', text: `Template "${templateId}" not found` })
+      return
+    }
+    const normalized = graphSchema.normalizeCanonicalGraph(JSON.parse(JSON.stringify(template.graph)))
+    if (!normalized) {
+      setNotice({ type: 'error', text: `Template "${template.label}" failed to normalize` })
+      return
+    }
+    if (template.graph._builderMeta) {
+      normalized._builderMeta = template.graph._builderMeta
+    } else {
+      normalized._builderMeta = inferBuilderMetaFromGraph(normalized)
+    }
+    setGraph(normalized)
+    setImportText(JSON.stringify(normalized, null, 2))
+    setSelectedScreenId(normalized.entryScreenId)
+    setSelectedNodeId('')
+    setPreviewPlaceholderScreen(null)
+    setPreviewScreenId(normalized.entryScreenId)
+    setPreviewHistory([])
+    setPreviewVars({})
+    setPreviewStorage({})
+    setBindingsDraftByScreen({})
+    setNodePositions({})
+    setRunTargetPositions({})
+    setVisibleRunTargetIds([])
+    setLayoutTick((tick) => tick + 1)
+    setNotice({ type: 'success', text: `Loaded template: ${template.label}` })
     setTimeout(() => flowInstance?.fitView({ padding: 0.2 }), 10)
   }
 
@@ -1218,8 +2366,232 @@ export default function useGraphEditor() {
     setImportText(JSON.stringify(graph, null, 2))
   }
 
+  function setSchemaVersion(nextSchemaVersion) {
+    const nextVersion = String(nextSchemaVersion || '')
+    const descriptor = schemaRegistry.getSchemaDescriptor(nextVersion)
+    if (!descriptor) {
+      setNotice({ type: 'error', text: `Unknown schema version: ${nextVersion}` })
+      return
+    }
+
+    if (graph.schemaVersion === descriptor.schemaVersion) {
+      return
+    }
+
+    const migrated = graphSchema.normalizeCanonicalGraph({
+      ...graph,
+      schemaVersion: descriptor.schemaVersion
+    })
+
+    if (!migrated) {
+      setNotice({ type: 'error', text: `Could not migrate graph to ${descriptor.schemaVersion}` })
+      return
+    }
+
+    const supportedRunTypes = descriptor.enums?.runTypes || []
+    const nextVisibleRunTargetIds = visibleRunTargetIds.filter((targetId) => {
+      const target = getRunTargetDefinition(targetId)
+      return !!target && supportedRunTypes.includes(target.runType)
+    })
+    const nextRequiredRunTargetIds = collectRequiredRunTargetIds(migrated)
+    const nextSelectedScreenId = migrated.screens[selectedScreenId] ? selectedScreenId : migrated.entryScreenId
+    const nextPreviewScreenId =
+      previewScreenId !== PREVIEW_PLACEHOLDER_ID && migrated.screens[previewScreenId]
+        ? previewScreenId
+        : migrated.entryScreenId
+
+    let nextSelectedNodeId = ''
+    if (selectedNodeId) {
+      if (!isRunTargetId(selectedNodeId) && migrated.screens[selectedNodeId]) {
+        nextSelectedNodeId = selectedNodeId
+      } else if (
+        isRunTargetId(selectedNodeId) &&
+        (nextVisibleRunTargetIds.includes(selectedNodeId) || nextRequiredRunTargetIds.includes(selectedNodeId))
+      ) {
+        nextSelectedNodeId = selectedNodeId
+      }
+    }
+
+    setGraph(migrated)
+    setSelectedScreenId(nextSelectedScreenId)
+    setSelectedNodeId(nextSelectedNodeId)
+    setPreviewPlaceholderScreen(null)
+    setPreviewScreenId(nextPreviewScreenId)
+    setPreviewHistory((prev) => prev.filter((screenId) => migrated.screens[screenId]))
+    setBindingsDraftByScreen((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([screenId]) => migrated.screens[screenId]))
+    )
+    setRunTargetPositions((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([targetId]) => nextVisibleRunTargetIds.includes(targetId)))
+    )
+    setVisibleRunTargetIds(nextVisibleRunTargetIds)
+    setLayoutTick((tick) => tick + 1)
+    setNotice({ type: 'success', text: `Migrated graph to ${descriptor.schemaVersion}` })
+    setTimeout(() => flowInstance?.fitView({ padding: 0.2, duration: 250 }), 10)
+  }
+
   function setEntryScreenId(id) {
     setGraph((prev) => ({ ...prev, entryScreenId: id }))
+  }
+
+  function addVariable(key, defaultValue = '', typeHint = 'string') {
+    const cleanKey = sanitizeId(key, 'var')
+    setGraph((prev) => {
+      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
+      if (meta.variables.some((v) => v.key === cleanKey)) {
+        return prev
+      }
+      return {
+        ...prev,
+        _builderMeta: {
+          ...meta,
+          variables: [...meta.variables, { key: cleanKey, defaultValue, typeHint }]
+        }
+      }
+    })
+  }
+
+  function removeVariable(key) {
+    setGraph((prev) => {
+      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
+      return {
+        ...prev,
+        _builderMeta: {
+          ...meta,
+          variables: meta.variables.filter((v) => v.key !== key)
+        }
+      }
+    })
+  }
+
+  function updateVariable(key, field, value) {
+    setGraph((prev) => {
+      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
+      return {
+        ...prev,
+        _builderMeta: {
+          ...meta,
+          variables: meta.variables.map((v) =>
+            v.key === key ? { ...v, [field]: value } : v
+          )
+        }
+      }
+    })
+  }
+
+  function addStorageKey(key, typeHint = 'string') {
+    const cleanKey = sanitizeId(key, 'store')
+    setGraph((prev) => {
+      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
+      if (meta.storageKeys.some((s) => s.key === cleanKey)) {
+        return prev
+      }
+      return {
+        ...prev,
+        _builderMeta: {
+          ...meta,
+          storageKeys: [...meta.storageKeys, { key: cleanKey, typeHint }]
+        }
+      }
+    })
+  }
+
+  function removeStorageKey(key) {
+    setGraph((prev) => {
+      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
+      return {
+        ...prev,
+        _builderMeta: {
+          ...meta,
+          storageKeys: meta.storageKeys.filter((s) => s.key !== key)
+        }
+      }
+    })
+  }
+
+  function updateStorageKey(key, field, value) {
+    setGraph((prev) => {
+      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
+      return {
+        ...prev,
+        _builderMeta: {
+          ...meta,
+          storageKeys: meta.storageKeys.map((s) =>
+            s.key === key ? { ...s, [field]: value } : s
+          )
+        }
+      }
+    })
+  }
+
+  function declareFromUndeclared(key, kind) {
+    if (kind === 'storage') {
+      addStorageKey(key)
+      addDataItem({ key, scope: 'persistent', typeHint: 'string' })
+    } else {
+      addVariable(key)
+      addDataItem({ key, scope: 'session', defaultValue: '', typeHint: 'string' })
+    }
+  }
+
+  function addDataItem(item) {
+    setGraph((prev) => {
+      const meta = prev._builderMeta || { variables: [], storageKeys: [], dataItems: [] }
+      const dataItems = Array.isArray(meta.dataItems) ? meta.dataItems : []
+      if (dataItems.some((d) => d.key === item.key && d.scope === item.scope)) {
+        return prev
+      }
+      return {
+        ...prev,
+        _builderMeta: {
+          ...meta,
+          dataItems: [...dataItems, item]
+        }
+      }
+    })
+  }
+
+  function removeDataItem(key, scope) {
+    setGraph((prev) => {
+      const meta = prev._builderMeta || { variables: [], storageKeys: [], dataItems: [] }
+      const dataItems = Array.isArray(meta.dataItems) ? meta.dataItems : []
+      return {
+        ...prev,
+        _builderMeta: {
+          ...meta,
+          dataItems: dataItems.filter((d) => !(d.key === key && d.scope === scope))
+        }
+      }
+    })
+  }
+
+  function updateDataItem(key, scope, field, value) {
+    setGraph((prev) => {
+      const meta = prev._builderMeta || { variables: [], storageKeys: [], dataItems: [] }
+      const dataItems = Array.isArray(meta.dataItems) ? meta.dataItems : []
+      return {
+        ...prev,
+        _builderMeta: {
+          ...meta,
+          dataItems: dataItems.map((d) =>
+            d.key === key && d.scope === scope ? { ...d, [field]: value } : d
+          )
+        }
+      }
+    })
+  }
+
+  function setStorageNamespace(rawValue) {
+    const nextValue = sanitizeId(rawValue, '')
+    setGraph((prev) => {
+      const next = { ...prev }
+      if (nextValue) {
+        next.storageNamespace = nextValue
+      } else {
+        delete next.storageNamespace
+      }
+      return next
+    })
   }
 
   return {
@@ -1241,10 +2613,12 @@ export default function useGraphEditor() {
     screenIds,
     unmappedCount,
     selectedNodeUsages,
+    graphReferenceCatalog,
     normalizedExportText,
     canExport,
     graphBuilderSpec,
     screenBuilderSpec,
+    schemaVersions,
 
     // Setters
     setImportText,
@@ -1263,10 +2637,31 @@ export default function useGraphEditor() {
     addMenuItem,
     removeMenuItem,
     updateMenuItem,
+    addScreenHook,
+    removeScreenHook,
+    updateScreenHook,
+    toggleScreenTimer,
+    updateScreenTimer,
     addScreenAction,
     removeScreenAction,
     updateScreenAction,
+    updateCanvasTemplate,
+    updateCanvasHeader,
+    addCanvasItem,
+    removeCanvasItem,
+    updateCanvasItem,
+    updateMotionField,
+    addMotionTrack,
+    removeMotionTrack,
+    updateMotionTrack,
+    detachMotionToRaw,
+    enablePresetMotion,
+    updateDrawField,
+    addDrawStep,
+    removeDrawStep,
+    updateDrawStep,
     handleImport,
+    loadTemplate,
     handleCopyExport,
     handleDownloadExport,
     loadCurrentIntoImportBox,
@@ -1276,12 +2671,25 @@ export default function useGraphEditor() {
     handleEdgesDelete,
     clearLinkByHandle,
     jumpPreviewTo,
+    setSchemaVersion,
     setEntryScreenId,
+    setStorageNamespace,
     getBindingsDraft,
     updateBindingsDraft,
     commitBindingsDraft,
     applyBindingsPreset,
+    ensureCurrentScreenBinding,
     describeCanvasTarget,
-    focusNode
+    focusNode,
+    addVariable,
+    removeVariable,
+    updateVariable,
+    addStorageKey,
+    removeStorageKey,
+    updateStorageKey,
+    declareFromUndeclared,
+    addDataItem,
+    removeDataItem,
+    updateDataItem
   }
 }

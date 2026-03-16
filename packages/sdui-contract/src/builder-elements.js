@@ -35,14 +35,26 @@ function deriveBuilderSpecForScreen(screenType, schemaVersion) {
       runTypes: descriptor.enums.runTypes.slice(),
       actionSlots: descriptor.enums.actionSlots.slice(),
       actionIcons: descriptor.enums.actionIcons.slice(),
-      vibeTypes: descriptor.enums.vibeTypes.slice()
+      vibeTypes: descriptor.enums.vibeTypes.slice(),
+      drawPlayModes: (descriptor.enums.drawPlayModes || []).slice(),
+      drawBackgrounds: (descriptor.enums.drawBackgrounds || []).slice(),
+      drawKinds: (descriptor.enums.drawKinds || []).slice(),
+      drawColors: (descriptor.enums.drawColors || []).slice(),
+      canvasTemplates: (descriptor.enums.canvasTemplates || []).slice(),
+      motionPresets: (descriptor.enums.motionPresets || []).slice(),
+      motionSpeeds: (descriptor.enums.motionSpeeds || []).slice(),
+      motionIntensities: (descriptor.enums.motionIntensities || []).slice(),
+      motionPlacements: (descriptor.enums.motionPlacements || []).slice()
     },
     uiSections: descriptor.uiSections,
     screenFields: getScreenFieldDefinitions(screenType, descriptor.schemaVersion),
     itemFields: cloneFieldList(descriptor.fieldDefs.item),
     actionFields: cloneFieldList(descriptor.fieldDefs.action),
     menuActionFields: cloneFieldList(descriptor.fieldDefs.menuAction || []),
-    drawerItemFields: cloneFieldList(descriptor.fieldDefs.drawerItem || descriptor.fieldDefs.menuAction || [])
+    drawerItemFields: cloneFieldList(descriptor.fieldDefs.drawerItem || descriptor.fieldDefs.menuAction || []),
+    hookRunFields: cloneFieldList(descriptor.fieldDefs.hookRun || []),
+    timerRunFields: cloneFieldList(descriptor.fieldDefs.timerRun || []),
+    motionTrackFields: cloneFieldList(descriptor.fieldDefs.motionTrack || [])
   };
 }
 
@@ -71,6 +83,8 @@ module.exports = {
   ACTION_FIELD_DEFS: cloneFieldList(latestDescriptor.fieldDefs.action),
   MENU_ACTION_FIELD_DEFS: cloneFieldList(latestDescriptor.fieldDefs.menuAction || []),
   DRAWER_ITEM_FIELD_DEFS: cloneFieldList(latestDescriptor.fieldDefs.drawerItem || latestDescriptor.fieldDefs.menuAction || []),
+  HOOK_RUN_FIELD_DEFS: cloneFieldList(latestDescriptor.fieldDefs.hookRun || []),
+  TIMER_RUN_FIELD_DEFS: cloneFieldList(latestDescriptor.fieldDefs.timerRun || []),
   getScreenFieldDefinitions: getScreenFieldDefinitions,
   deriveBuilderSpecForScreen: deriveBuilderSpecForScreen,
   deriveBuilderSpecFromGraph: deriveBuilderSpecFromGraph

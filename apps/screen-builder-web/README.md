@@ -1,6 +1,6 @@
 # screen-builder-web
 
-Next.js builder app for authoring `pebble.sdui.v1` graph schemas.
+Next.js builder app for authoring versioned Pebble SDUI graph schemas.
 
 ## Core behavior
 

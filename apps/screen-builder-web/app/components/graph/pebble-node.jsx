@@ -5,7 +5,8 @@ import {
   screenUsesSelectDrawer,
   getScreenActions
 } from '@/app/lib/constants'
-import { isEntityWired, describeRunTarget } from '@/app/lib/graph-utils'
+import { isEntityWired, isRunConfigured, describeRunTarget, getScreenHookRuns, getScreenTimerRun } from '@/app/lib/graph-utils'
+import DrawAnimationPreview from '@/app/components/draw-animation-preview'
 
 const SLOT_TOP = {
   up: '28%',
@@ -168,6 +169,7 @@ export default function PebbleNode({ data, selected, id }) {
   const screen = data.screen || {}
   const previewScreen = data.previewScreen || screen
   const isMenu = previewScreen.type === 'menu'
+  const isDraw = previewScreen.type === 'draw'
   const usesButtonSlots = screenUsesButtonSlots(previewScreen)
   const usesDrawer = screenUsesSelectDrawer(previewScreen)
   const actions = getScreenActions(previewScreen)
@@ -206,10 +208,42 @@ export default function PebbleNode({ data, selected, id }) {
             <div className="screen-node-preview-body screen-node-preview-body-scroll">{bodyText}</div>
           ) : null}
 
+          {isDraw ? (
+            <div className="screen-node-preview-draw">
+              <DrawAnimationPreview screen={previewScreen} compact />
+            </div>
+          ) : null}
+
           {isMenu ? <MenuRows id={id} screen={data} items={items} /> : null}
           {usesDrawer ? <ScrollActionMenu id={id} screen={data} actions={actions} /> : null}
         </div>
       </div>
+
+      {/* Hidden handles for lifecycle hook and timer edges */}
+      {['onEnter', 'onExit'].flatMap((hookKey) =>
+        getScreenHookRuns(screen, hookKey)
+          .map((run, i) => ({ run, hookKey, i }))
+          .filter(({ run }) => isRunConfigured(run))
+          .map(({ hookKey: hk, i }) => (
+            <Handle
+              key={`hook-${hk}-${i}`}
+              type="source"
+              id={`hook-${hk}-${i}`}
+              position={Position.Right}
+              className="pebble-handle"
+              style={{ top: '90%', opacity: 0, width: 1, height: 1 }}
+            />
+          ))
+      )}
+      {getScreenTimerRun(screen) && isRunConfigured(getScreenTimerRun(screen)) && (
+        <Handle
+          type="source"
+          id="timer-run"
+          position={Position.Right}
+          className="pebble-handle"
+          style={{ top: '95%', opacity: 0, width: 1, height: 1 }}
+        />
+      )}
     </div>
   )
 }

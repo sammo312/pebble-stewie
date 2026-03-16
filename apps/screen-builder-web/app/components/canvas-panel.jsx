@@ -11,6 +11,7 @@ import CanvasPalette from './canvas-palette'
 import { isRunTargetId } from '@/app/lib/constants'
 
 export default function CanvasPanel({
+  graphBuilderSpec,
   nodes,
   edges,
   handleNodesChange,
@@ -32,6 +33,7 @@ export default function CanvasPanel({
     <div className="absolute inset-0 min-w-0 min-h-0">
       <div className="absolute inset-0 overflow-hidden bg-black">
         <CanvasPalette
+          graphBuilderSpec={graphBuilderSpec}
           addScreen={addScreen}
           addRunTargetNode={addRunTargetNode}
           openCommandPalette={openCommandPalette}
@@ -47,12 +49,16 @@ export default function CanvasPanel({
           onNodeClick={(_, node) => {
             setSelectedNodeId(node.id)
             if (isRunTargetId(node.id)) {
+              setSelectedScreenId('')
               return
             }
             setSelectedScreenId(node.id)
             jumpPreviewTo(node.id, { resetHistory: true })
           }}
-          onPaneClick={() => setSelectedNodeId('')}
+          onPaneClick={() => {
+            setSelectedNodeId('')
+            setSelectedScreenId('')
+          }}
           onConnect={handleConnect}
           onEdgeClick={(_, edge) => {
             if (edge?.data?.source && edge?.data?.sourceHandle) {

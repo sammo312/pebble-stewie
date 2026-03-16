@@ -3,6 +3,38 @@
 #include "stewie/state.h"
 #include "stewie/ui.h"
 
+#define STEWIE_MESSAGE_KEY_DRAWING 10014
+
+static size_t prv_copy_tuple_text(char *dest, size_t dest_size, Tuple *tuple, DictionaryIterator *iter) {
+  const uint8_t *src = tuple ? tuple->value->data : NULL;
+  const uint8_t *dict_end = iter && iter->end ? (const uint8_t *)iter->end : NULL;
+  size_t src_len = tuple ? tuple->length : 0;
+
+  if (!dest || dest_size == 0) {
+    return 0;
+  }
+
+  dest[0] = '\0';
+
+  if (!tuple || tuple->type != TUPLE_CSTRING || !src || !dict_end || src >= dict_end) {
+    return 0;
+  }
+
+  size_t available = (size_t)(dict_end - src);
+  if (src_len > available) {
+    APP_LOG(APP_LOG_LEVEL_WARNING, "Clamping tuple key %lu len %u to %u", (unsigned long)tuple->key,
+            (unsigned int)src_len, (unsigned int)available);
+    src_len = available;
+  }
+
+  if (src_len > 0 && src[src_len - 1] == '\0') {
+    src_len -= 1;
+  }
+
+  stewie_copy_with_limit(dest, dest_size, (const char *)src, src_len);
+  return src_len;
+}
+
 static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) {
   Tuple *msg_type_tuple = dict_find(iter, MESSAGE_KEY_msgType);
   if (msg_type_tuple && msg_type_tuple->value->uint8 != MSG_TYPE_RENDER) {
@@ -17,8 +49,7 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
 
   Tuple *screen_id_tuple = dict_find(iter, MESSAGE_KEY_screenId);
   if (screen_id_tuple && screen_id_tuple->type == TUPLE_CSTRING) {
-    stewie_copy_with_limit(s_current_screen_id, sizeof(s_current_screen_id), screen_id_tuple->value->cstring,
-                           strlen(screen_id_tuple->value->cstring));
+    prv_copy_tuple_text(s_current_screen_id, sizeof(s_current_screen_id), screen_id_tuple, iter);
   }
 
   const uint8_t ui_type = ui_type_tuple->value->uint8;
@@ -111,6 +142,55 @@ static void prv_inbox_received_handler(DictionaryIterator *iter, void *context) 
 
     stewie_reset_card_actions();
     stewie_show_scroll();
+  }
+
+  if (ui_type == UI_TYPE_DRAW) {
+    Tuple *title_tuple = dict_find(iter, MESSAGE_KEY_title);
+    Tuple *body_tuple = dict_find(iter, MESSAGE_KEY_body);
+    Tuple *drawing_tuple = dict_find(iter, STEWIE_MESSAGE_KEY_DRAWING);
+
+    stewie_reset_menu_actions();
+    stewie_reset_card_actions();
+
+    if (title_tuple && title_tuple->type == TUPLE_CSTRING) {
+      prv_copy_tuple_text(s_card_title, sizeof(s_card_title), title_tuple, iter);
+    } else {
+      stewie_copy_with_limit(s_card_title, sizeof(s_card_title), "Draw", 4);
+    }
+
+    if (body_tuple && body_tuple->type == TUPLE_CSTRING) {
+      prv_copy_tuple_text(s_card_body, sizeof(s_card_body), body_tuple, iter);
+    } else {
+      s_card_body[0] = '\0';
+    }
+
+    if (drawing_tuple && drawing_tuple->type == TUPLE_CSTRING) {
+      size_t drawing_len =
+          prv_copy_tuple_text(s_draw_payload_buffer, sizeof(s_draw_payload_buffer), drawing_tuple, iter);
+      stewie_parse_drawing(s_draw_payload_buffer, drawing_len);
+    } else {
+      stewie_reset_draw();
+    }
+
+    stewie_show_draw();
+  }
+
+  if (ui_type == UI_TYPE_VOICE) {
+    Tuple *title_tuple = dict_find(iter, MESSAGE_KEY_title);
+
+    stewie_reset_menu_actions();
+    stewie_reset_card_actions();
+
+    if (title_tuple && title_tuple->type == TUPLE_CSTRING) {
+      stewie_copy_with_limit(s_card_title, sizeof(s_card_title), title_tuple->value->cstring,
+                             strlen(title_tuple->value->cstring));
+    } else {
+      stewie_copy_with_limit(s_card_title, sizeof(s_card_title), "Voice", 5);
+    }
+
+    stewie_copy_with_limit(s_card_body, sizeof(s_card_body), "Listening...", 12);
+    stewie_show_card();
+    stewie_start_dictation();
   }
 
   // Handle run effects
@@ -215,6 +295,13 @@ static void prv_window_load(Window *window) {
   layer_add_child(window_layer, scroll_layer_get_layer(s_scroll_layer));
   layer_set_hidden(scroll_layer_get_layer(s_scroll_layer), true);
 
+  s_draw_layer = layer_create(GRect(0, 28, s_window_bounds.size.w, s_window_bounds.size.h - 28));
+  if (s_draw_layer) {
+    layer_set_update_proc(s_draw_layer, stewie_draw_update_proc);
+    layer_add_child(window_layer, s_draw_layer);
+    layer_set_hidden(s_draw_layer, true);
+  }
+
   if (s_menu_action_hint_layer) {
     layer_remove_from_parent(s_menu_action_hint_layer);
     layer_add_child(window_layer, s_menu_action_hint_layer);
@@ -256,6 +343,11 @@ static void prv_window_unload(Window *window) {
   if (s_scroll_layer) {
     scroll_layer_destroy(s_scroll_layer);
     s_scroll_layer = NULL;
+  }
+  stewie_stop_draw_animation();
+  if (s_draw_layer) {
+    layer_destroy(s_draw_layer);
+    s_draw_layer = NULL;
   }
 
   if (s_icon_play) {
@@ -311,6 +403,7 @@ static void prv_init(void) {
 }
 
 static void prv_deinit(void) {
+  stewie_stop_draw_animation();
   if (s_dictation_session) {
     dictation_session_destroy(s_dictation_session);
     s_dictation_session = NULL;

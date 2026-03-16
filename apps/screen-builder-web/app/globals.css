@@ -220,6 +220,18 @@ code {
   border-bottom: 1px solid var(--line);
 }
 
+.screen-node-preview-draw {
+  padding: 0.55rem;
+}
+
+.screen-node-preview-draw .draw-stage-frame {
+  padding: 0.2rem;
+}
+
+.screen-node-preview-draw .draw-stage-svg {
+  max-height: 10rem;
+}
+
 .screen-node-section {
   display: grid;
   gap: 0.35rem;
@@ -443,11 +455,120 @@ code {
   color: var(--ink);
 }
 
+.draw-preview-shell {
+  display: grid;
+  gap: 0.55rem;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.draw-preview-shell-compact {
+  gap: 0.4rem;
+}
+
+.draw-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.draw-preview-meta {
+  display: inline-flex;
+  gap: 0.5rem;
+  font-family: 'IBM Plex Mono', 'Menlo', monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.draw-preview-badges {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.draw-stage-frame {
+  border: 1px solid var(--line);
+  background: #050505;
+  padding: 0.35rem;
+}
+
+.draw-stage-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 144 / 168;
+}
+
+.draw-step-legend {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.draw-step-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0.3rem 0.45rem;
+  font-family: 'IBM Plex Mono', 'Menlo', monospace;
+  font-size: 0.62rem;
+  color: var(--ink);
+}
+
+.draw-step-pill > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draw-step-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+}
+
+.draw-step-meta {
+  margin-left: auto;
+  color: var(--ink-dim);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.draw-note {
+  border: 1px solid var(--line);
+  background: #020202;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.68rem;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+
+.draw-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--ink);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.draw-checkbox input {
+  accent-color: #fff;
+}
+
 /* --- Form fields (used in inspector and dialogs) --- */
 .field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
+  gap: 0.75rem 0.625rem;
+  align-items: start;
 }
 
 .field-grid.compact {
@@ -458,25 +579,197 @@ code {
   grid-column: span 2;
 }
 
+.field-shell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 .field-label {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.25rem;
+  min-height: 1rem;
   font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--ink-dim);
 }
 
+.field-footer {
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+}
+
 .field-hint {
   display: block;
   font-size: 0.62rem;
+  line-height: 1.45;
   color: var(--ink-dim);
   opacity: 0.7;
-  margin-bottom: 0.25rem;
+  margin: 0;
   text-transform: none;
   letter-spacing: normal;
+}
+
+.field-assist-block {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.field-assist-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.token-field-shell {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.field-token-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.token-field-stage {
+  position: relative;
+}
+
+.token-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--ink);
+  padding: 0.15rem 0.45rem;
+  font-family: 'IBM Plex Mono', 'Menlo', monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.token-chip:hover {
+  border-color: var(--ring);
+}
+
+.token-field-input {
+  text-transform: none;
+}
+
+.token-chip-row {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.token-chip-row-label {
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.token-chip-collection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.token-menu-layer {
+  position: absolute;
+  z-index: 30;
+}
+
+.token-insert-menu {
+  min-width: 13rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0.4rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.token-insert-group {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.token-insert-heading {
+  padding: 0 0.2rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.token-insert-items {
+  display: grid;
+  gap: 0.16rem;
+}
+
+.token-insert-item {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  padding: 0.42rem 0.5rem;
+  font-family: 'IBM Plex Mono', 'Menlo', monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.token-insert-item:hover {
+  border-color: var(--line);
+  background: var(--panel-soft);
+}
+
+.token-config-panel {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.token-config-title {
+  font-size: 0.66rem;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.token-bank {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.token-bank-group {
+  border: 1px solid var(--line);
+  background: #020202;
+  padding: 0.55rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.token-bank-head {
+  display: grid;
+  gap: 0.16rem;
+}
+
+.token-bank-head strong {
+  font-size: 0.66rem;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.token-bank-head span {
+  font-size: 0.62rem;
+  color: var(--ink-dim);
+  line-height: 1.45;
 }
 
 .field-input {
@@ -490,7 +783,6 @@ code {
   font-size: 0.72rem;
   outline: none;
   transition: border-color 160ms ease, box-shadow 160ms ease;
-  text-transform: uppercase;
 }
 
 .field-input:focus {
@@ -505,6 +797,24 @@ code {
 
 .field-input.area.tall {
   min-height: 200px;
+}
+
+.field-boolean {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--line);
+  background: #020202;
+  padding: 0 0.55rem;
+  font-family: 'IBM Plex Mono', 'Menlo', monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.field-boolean input {
+  accent-color: #fff;
 }
 
 /* --- List cards (used in inspector for items/actions) --- */

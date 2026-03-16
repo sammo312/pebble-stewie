@@ -6,6 +6,11 @@ void stewie_layout_menu_layers(void);
 void stewie_show_menu(void);
 void stewie_show_card(void);
 void stewie_show_scroll(void);
+void stewie_show_draw(void);
+void stewie_stop_draw_animation(void);
+void stewie_reset_draw(void);
+void stewie_parse_drawing(const char *encoded_drawing, size_t encoded_drawing_len);
+void stewie_draw_update_proc(Layer *layer, GContext *ctx);
 void stewie_parse_menu_items(const char *encoded_items);
 void stewie_menu_action_hint_update_proc(Layer *layer, GContext *ctx);
 

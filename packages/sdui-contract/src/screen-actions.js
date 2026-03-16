@@ -27,6 +27,32 @@ function sanitizeGraphId(id, fallback, maxLen) {
   return cleaned.substring(0, maxLen || constants.MAX_ACTION_ID_LEN);
 }
 
+function sanitizeVarKey(key) {
+  return sanitizeGraphId(key, '', constants.MAX_ACTION_ID_LEN);
+}
+
+function normalizeCondition(rawCondition, descriptor) {
+  if (!rawCondition || typeof rawCondition !== 'object') {
+    return null;
+  }
+
+  var conditionOps = descriptor && descriptor.enums && Array.isArray(descriptor.enums.conditionOps) ?
+    descriptor.enums.conditionOps : [];
+  var key = sanitizeVarKey(rawCondition.var);
+  var op = textUtils.sanitizeText(rawCondition.op).toLowerCase();
+  var value = textUtils.sanitizeText(rawCondition.value);
+
+  if (!key || conditionOps.indexOf(op) < 0) {
+    return null;
+  }
+
+  return {
+    var: key,
+    op: op,
+    value: value
+  };
+}
+
 function normalizeRun(rawRun, schemaVersionOrDescriptor) {
   if (!rawRun || typeof rawRun !== 'object') {
     return null;
@@ -50,13 +76,47 @@ function normalizeRun(rawRun, schemaVersionOrDescriptor) {
     if (!targetScreen) {
       return null;
     }
+    var condition = normalizeCondition(rawRun.condition, descriptor);
     var nav = {
       type: 'navigate',
       screen: targetScreen
     };
+    if (condition) { nav.condition = condition; }
     if (vibe) { nav.vibe = vibe; }
     if (light) { nav.light = true; }
     return nav;
+  }
+
+  if (type === 'set_var') {
+    var key = sanitizeVarKey(rawRun.key);
+    var value = textUtils.sanitizeText(rawRun.value);
+    if (!key || !value) {
+      return null;
+    }
+    var setVar = {
+      type: 'set_var',
+      key: key,
+      value: value
+    };
+    if (vibe) { setVar.vibe = vibe; }
+    if (light) { setVar.light = true; }
+    return setVar;
+  }
+
+  if (type === 'store') {
+    var storageKey = sanitizeVarKey(rawRun.key);
+    var storageValue = textUtils.sanitizeText(rawRun.value);
+    if (!storageKey || !storageValue) {
+      return null;
+    }
+    var store = {
+      type: 'store',
+      key: storageKey,
+      value: storageValue
+    };
+    if (vibe) { store.vibe = vibe; }
+    if (light) { store.light = true; }
+    return store;
   }
 
   if (type === 'agent_prompt') {
@@ -99,6 +159,26 @@ function normalizeRun(rawRun, schemaVersionOrDescriptor) {
     return effect;
   }
 
+  if (type === 'dictation') {
+    var rawVariable = textUtils.sanitizeText(rawRun.variable).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    if (!rawVariable) {
+      return null;
+    }
+    var dictation = {
+      type: 'dictation',
+      variable: rawVariable.substring(0, constants.MAX_ACTION_ID_LEN)
+    };
+    var dictScreen = rawRun.screen ? sanitizeGraphId(rawRun.screen, '', constants.MAX_SCREEN_ID_LEN) : '';
+    if (dictScreen) { dictation.screen = dictScreen; }
+    if (rawRun.then && typeof rawRun.then === 'object' && rawRun.then.type) {
+      var normalizedThen = normalizeRun(rawRun.then, schemaVersionOrDescriptor);
+      if (normalizedThen) { dictation.then = normalizedThen; }
+    }
+    if (vibe) { dictation.vibe = vibe; }
+    if (light) { dictation.light = true; }
+    return dictation;
+  }
+
   return null;
 }
 
@@ -134,6 +214,10 @@ function normalizeActionIcon(icon, descriptor) {
   return token;
 }
 
+function looksLikeTemplateText(value) {
+  return /\{\{|\}\}/.test(String(value || ''));
+}
+
 function normalizeScreenActions(rawActions, schemaVersionOrDescriptor) {
   if (!rawActions || !rawActions.length) {
     return [];
@@ -166,11 +250,16 @@ function normalizeScreenActions(rawActions, schemaVersionOrDescriptor) {
     seenIds[actionId] = true;
 
     var label = textUtils.limitText(action.label || action.title || actionId, constants.MAX_OPTION_LABEL_LEN);
+    var labelTemplate = action.labelTemplate ? String(action.labelTemplate) : '';
+    if (!labelTemplate && looksLikeTemplateText(label)) {
+      labelTemplate = label;
+    }
     actions.push({
       id: actionId,
       slot: slot,
       icon: normalizeActionIcon(action.icon, descriptor),
       label: label || actionId,
+      labelTemplate: labelTemplate,
       value: textUtils.sanitizeText(action.value || label || actionId),
       run: normalizeRun(action.run, descriptor)
     });
@@ -208,9 +297,15 @@ function normalizeMenuActions(rawActions, schemaVersionOrDescriptor) {
       continue;
     }
 
+    var labelTemplate = action.labelTemplate ? String(action.labelTemplate) : '';
+    if (!labelTemplate && looksLikeTemplateText(label)) {
+      labelTemplate = label;
+    }
+
     actions.push({
       id: actionId,
       label: label,
+      labelTemplate: labelTemplate,
       value: textUtils.sanitizeText(action.value || label || actionId),
       run: normalizeRun(action.run, descriptor)
     });

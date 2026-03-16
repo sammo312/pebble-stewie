@@ -14,10 +14,14 @@ import {
 import { RUN_TARGETS, SCREEN_TYPE_ICONS } from '@/app/lib/constants'
 
 export default function CanvasPalette({
+  graphBuilderSpec,
   addScreen,
   addRunTargetNode,
   openCommandPalette
 }) {
+  const allowedScreenTypes = new Set(graphBuilderSpec?.enums?.screenTypes || ['menu', 'card', 'scroll'])
+  const allowedRunTypes = new Set(graphBuilderSpec?.enums?.runTypes || [])
+
   return (
     <div className="pointer-events-auto absolute left-4 top-4 z-20 flex items-center gap-2">
       <DropdownMenu>
@@ -31,15 +35,26 @@ export default function CanvasPalette({
             Screens
           </DropdownMenuLabel>
           <DropdownMenuGroup>
-            <DropdownMenuItem className="rounded-none" onSelect={() => addScreen('menu')}>
-              {SCREEN_TYPE_ICONS.menu} Menu Screen
-            </DropdownMenuItem>
-            <DropdownMenuItem className="rounded-none" onSelect={() => addScreen('card')}>
-              {SCREEN_TYPE_ICONS.card} Card Screen
-            </DropdownMenuItem>
-            <DropdownMenuItem className="rounded-none" onSelect={() => addScreen('scroll')}>
-              {SCREEN_TYPE_ICONS.scroll} Scroll Screen
-            </DropdownMenuItem>
+            {allowedScreenTypes.has('menu') && (
+              <DropdownMenuItem className="rounded-none" onSelect={() => addScreen('menu')}>
+                {SCREEN_TYPE_ICONS.menu} Menu Screen
+              </DropdownMenuItem>
+            )}
+            {allowedScreenTypes.has('card') && (
+              <DropdownMenuItem className="rounded-none" onSelect={() => addScreen('card')}>
+                {SCREEN_TYPE_ICONS.card} Card Screen
+              </DropdownMenuItem>
+            )}
+            {allowedScreenTypes.has('scroll') && (
+              <DropdownMenuItem className="rounded-none" onSelect={() => addScreen('scroll')}>
+                {SCREEN_TYPE_ICONS.scroll} Scroll Screen
+              </DropdownMenuItem>
+            )}
+            {allowedScreenTypes.has('draw') && (
+              <DropdownMenuItem className="rounded-none" onSelect={() => addScreen('draw')}>
+                {SCREEN_TYPE_ICONS.draw} Draw Screen
+              </DropdownMenuItem>
+            )}
           </DropdownMenuGroup>
 
           <DropdownMenuSeparator className="bg-line/70" />
@@ -47,7 +62,7 @@ export default function CanvasPalette({
             Workflow
           </DropdownMenuLabel>
           <DropdownMenuGroup>
-            {RUN_TARGETS.map((target) => (
+            {RUN_TARGETS.filter((target) => allowedRunTypes.has(target.runType)).map((target) => (
               <DropdownMenuItem
                 key={target.id}
                 className="rounded-none"

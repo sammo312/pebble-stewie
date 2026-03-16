@@ -112,19 +112,26 @@ export default function Page() {
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-bottom)]">
       <Toolbar
         graph={editor.graph}
+        graphBuilderSpec={editor.graphBuilderSpec}
+        schemaVersions={editor.schemaVersions}
         screenIds={editor.screenIds}
+        screenOptions={editor.graphReferenceCatalog.screenOptions}
         edges={editor.edges}
         unmappedCount={editor.unmappedCount}
+        undeclaredCount={(editor.graphReferenceCatalog.undeclaredVariableKeys?.length || 0) + (editor.graphReferenceCatalog.undeclaredStorageKeys?.length || 0)}
         canExport={editor.canExport}
         deleteSelectedScreen={editor.deleteSelectedScreen}
         resetLayout={editor.resetLayout}
+        setSchemaVersion={editor.setSchemaVersion}
         setEntryScreenId={editor.setEntryScreenId}
+        setStorageNamespace={editor.setStorageNamespace}
         setShowImportExport={editor.setShowImportExport}
         openCommandPalette={() => setCommandPaletteOpen(true)}
       />
 
       <main className="relative flex flex-1 min-h-0 overflow-hidden">
         <CanvasPanel
+          graphBuilderSpec={editor.graphBuilderSpec}
           nodes={editor.nodes}
           edges={editor.edges}
           handleNodesChange={editor.handleNodesChange}
@@ -157,30 +164,60 @@ export default function Page() {
             />
           </div>
 
-          {editor.selectedNodeId && (
-            <div className={`pointer-events-auto absolute inset-x-0 bottom-0 overflow-hidden ${isPreviewDocked ? 'top-[24rem]' : 'top-0'}`}>
-              <InspectorPanel
-                selectedNodeId={editor.selectedNodeId}
-                selectedScreen={editor.selectedScreen}
-                selectedRunTarget={editor.selectedRunTarget}
-                selectedNodeUsages={editor.selectedNodeUsages}
-                screenIds={editor.screenIds}
-                screenBuilderSpec={editor.screenBuilderSpec}
-                graphBuilderSpec={editor.graphBuilderSpec}
-                updateScreenField={editor.updateScreenField}
-                addMenuItem={editor.addMenuItem}
-                removeMenuItem={editor.removeMenuItem}
-                updateMenuItem={editor.updateMenuItem}
-                addScreenAction={editor.addScreenAction}
-                removeScreenAction={editor.removeScreenAction}
-                updateScreenAction={editor.updateScreenAction}
-                getBindingsDraft={editor.getBindingsDraft}
-                updateBindingsDraft={editor.updateBindingsDraft}
-                commitBindingsDraft={editor.commitBindingsDraft}
-                applyBindingsPreset={editor.applyBindingsPreset}
-              />
-            </div>
-          )}
+          <div className={`pointer-events-auto absolute inset-x-0 bottom-0 overflow-hidden ${isPreviewDocked ? 'top-[24rem]' : 'top-0'}`}>
+            <InspectorPanel
+              selectedNodeId={editor.selectedNodeId}
+              selectedScreen={editor.selectedScreen}
+              selectedRunTarget={editor.selectedRunTarget}
+              selectedNodeUsages={editor.selectedNodeUsages}
+              screenIds={editor.screenIds}
+              graphReferenceCatalog={editor.graphReferenceCatalog}
+              screenBuilderSpec={editor.screenBuilderSpec}
+              graphBuilderSpec={editor.graphBuilderSpec}
+              updateScreenField={editor.updateScreenField}
+              addMenuItem={editor.addMenuItem}
+              removeMenuItem={editor.removeMenuItem}
+              updateMenuItem={editor.updateMenuItem}
+              addScreenHook={editor.addScreenHook}
+              removeScreenHook={editor.removeScreenHook}
+              updateScreenHook={editor.updateScreenHook}
+              toggleScreenTimer={editor.toggleScreenTimer}
+              updateScreenTimer={editor.updateScreenTimer}
+              addScreenAction={editor.addScreenAction}
+              removeScreenAction={editor.removeScreenAction}
+              updateScreenAction={editor.updateScreenAction}
+              updateCanvasTemplate={editor.updateCanvasTemplate}
+              updateCanvasHeader={editor.updateCanvasHeader}
+              addCanvasItem={editor.addCanvasItem}
+              removeCanvasItem={editor.removeCanvasItem}
+              updateCanvasItem={editor.updateCanvasItem}
+              updateMotionField={editor.updateMotionField}
+              addMotionTrack={editor.addMotionTrack}
+              removeMotionTrack={editor.removeMotionTrack}
+              updateMotionTrack={editor.updateMotionTrack}
+              detachMotionToRaw={editor.detachMotionToRaw}
+              enablePresetMotion={editor.enablePresetMotion}
+              updateDrawField={editor.updateDrawField}
+              addDrawStep={editor.addDrawStep}
+              removeDrawStep={editor.removeDrawStep}
+              updateDrawStep={editor.updateDrawStep}
+              getBindingsDraft={editor.getBindingsDraft}
+              updateBindingsDraft={editor.updateBindingsDraft}
+              commitBindingsDraft={editor.commitBindingsDraft}
+              applyBindingsPreset={editor.applyBindingsPreset}
+              ensureCurrentScreenBinding={editor.ensureCurrentScreenBinding}
+              addVariable={editor.addVariable}
+              removeVariable={editor.removeVariable}
+              updateVariable={editor.updateVariable}
+              addStorageKey={editor.addStorageKey}
+              removeStorageKey={editor.removeStorageKey}
+              updateStorageKey={editor.updateStorageKey}
+              declareFromUndeclared={editor.declareFromUndeclared}
+              addDataItem={editor.addDataItem}
+              removeDataItem={editor.removeDataItem}
+              updateDataItem={editor.updateDataItem}
+            />
+          </div>
         </div>
       </main>
 
@@ -205,12 +242,14 @@ export default function Page() {
       <CommandPalette
         open={commandPaletteOpen}
         onOpenChange={setCommandPaletteOpen}
+        graphBuilderSpec={editor.graphBuilderSpec}
         screenIds={editor.screenIds}
         selectedNodeId={editor.selectedNodeId}
         addScreen={editor.addScreen}
         addRunTargetNode={editor.addRunTargetNode}
         focusNode={editor.focusNode}
         resetLayout={editor.resetLayout}
+        loadTemplate={editor.loadTemplate}
       />
 
       <Toaster />

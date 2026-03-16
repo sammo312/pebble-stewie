@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Search, Plus, Workflow, LocateFixed, Monitor } from 'lucide-react'
+import { Search, Plus, Workflow, LocateFixed, Monitor, FileBox } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -9,6 +9,7 @@ import {
   DialogTitle
 } from '@/app/components/ui/dialog'
 import { RUN_TARGETS, SCREEN_TYPE_ICONS } from '@/app/lib/constants'
+import { GRAPH_TEMPLATES } from '@/app/lib/graph-templates'
 
 function CommandRow({ action, active, onSelect }) {
   const Icon = action.icon
@@ -36,15 +37,19 @@ function CommandRow({ action, active, onSelect }) {
 export default function CommandPalette({
   open,
   onOpenChange,
+  graphBuilderSpec,
   screenIds,
   selectedNodeId,
   addScreen,
   addRunTargetNode,
   focusNode,
-  resetLayout
+  resetLayout,
+  loadTemplate
 }) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
+  const allowedScreenTypes = graphBuilderSpec?.enums?.screenTypes || ['menu', 'card', 'scroll']
+  const allowedRunTypes = graphBuilderSpec?.enums?.runTypes || []
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -67,35 +72,50 @@ export default function CommandPalette({
 
   const actions = useMemo(() => {
     const screenCreateActions = [
-      {
+      allowedScreenTypes.includes('menu') && {
         id: 'create:menu',
         label: `Create ${SCREEN_TYPE_ICONS.menu} Menu Screen`,
         section: 'Create Screen',
         icon: Plus,
         run: () => addScreen('menu')
       },
-      {
+      allowedScreenTypes.includes('card') && {
         id: 'create:card',
         label: `Create ${SCREEN_TYPE_ICONS.card} Card Screen`,
         section: 'Create Screen',
         icon: Plus,
         run: () => addScreen('card')
       },
-      {
+      allowedScreenTypes.includes('scroll') && {
         id: 'create:scroll',
         label: `Create ${SCREEN_TYPE_ICONS.scroll} Scroll Screen`,
         section: 'Create Screen',
         icon: Plus,
         run: () => addScreen('scroll')
-      }
-    ]
+      },
+      allowedScreenTypes.includes('draw') && {
+        id: 'create:draw',
+        label: `Create ${SCREEN_TYPE_ICONS.draw} Draw Screen`,
+        section: 'Create Screen',
+        icon: Plus,
+        run: () => addScreen('draw')
+      },
+    ].filter(Boolean)
 
-    const workflowActions = RUN_TARGETS.map((target) => ({
+    const workflowActions = RUN_TARGETS.filter((target) => allowedRunTypes.includes(target.runType)).map((target) => ({
       id: `workflow:${target.id}`,
       label: `Reveal ${target.title}`,
       section: 'Workflow Node',
       icon: Workflow,
       run: () => addRunTargetNode(target.id)
+    }))
+
+    const templateActions = GRAPH_TEMPLATES.map((template) => ({
+      id: `template:${template.id}`,
+      label: `${template.label}`,
+      section: 'Load Template',
+      icon: FileBox,
+      run: () => loadTemplate(template.id)
     }))
 
     const screenJumpActions = screenIds.map((screenId) => ({
@@ -107,6 +127,7 @@ export default function CommandPalette({
     }))
 
     return [
+      ...templateActions,
       ...screenCreateActions,
       ...workflowActions,
       ...screenJumpActions,
@@ -119,7 +140,7 @@ export default function CommandPalette({
         shortcut: selectedNodeId ? 'sel' : ''
       }
     ]
-  }, [addRunTargetNode, addScreen, focusNode, resetLayout, screenIds, selectedNodeId])
+  }, [addRunTargetNode, addScreen, allowedRunTypes, allowedScreenTypes, focusNode, loadTemplate, resetLayout, screenIds, selectedNodeId])
 
   const filteredActions = useMemo(() => {
     const search = query.trim().toLowerCase()

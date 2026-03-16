@@ -164,6 +164,8 @@
         var BUTTON_DOWN   = 1 << 3;
         var buttonStateAddr = 0;
         var syntheticLongPress = {};
+        var buttonDownTime = {};
+        var MINIMUM_PRESS_MS = 80;
         var btnMap = { back: BUTTON_BACK, up: BUTTON_UP, select: BUTTON_SELECT, down: BUTTON_DOWN };
 
         function clearButtonRelease(button) {
@@ -261,10 +263,16 @@
                         scheduleButtonRelease(data.button, bit, 850);
                     } else if (data.action === 'down') {
                         clearButtonRelease(data.button);
+                        buttonDownTime[data.button] = Date.now();
                         updateButtons(bit, true);
                     } else if (data.action === 'up') {
-                        clearButtonRelease(data.button);
-                        updateButtons(bit, false);
+                        var elapsed = Date.now() - (buttonDownTime[data.button] || 0);
+                        if (elapsed < MINIMUM_PRESS_MS) {
+                            scheduleButtonRelease(data.button, bit, MINIMUM_PRESS_MS - elapsed);
+                        } else {
+                            clearButtonRelease(data.button);
+                            updateButtons(bit, false);
+                        }
                     }
                 }
             }
@@ -298,7 +306,7 @@
 
         async function fetchBinary(url, label) {
             postToParent({ type: 'emulator-status', text: 'Downloading ' + label + '...' });
-            var resp = await fetch(url);
+            var resp = await fetch(url, { cache: 'no-store' });
             if (!resp.ok) throw new Error(label + ': HTTP ' + resp.status);
             return new Uint8Array(await resp.arrayBuffer());
         }

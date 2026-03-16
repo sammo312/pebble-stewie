@@ -49,7 +49,8 @@ const MESSAGE_KEYS = {
   actionIndex: 10010,
   actionText: 10011,
   effectVibe: 10012,
-  effectLight: 10013
+  effectLight: 10013,
+  drawing: 10014
 }
 
 // SDUI constants (must match src/pkjs/constants.js)
@@ -476,7 +477,8 @@ export function buildScreenRenderPacket(screen) {
 
   const isMenu = screen.type === 'menu'
   const isScroll = screen.type === 'scroll'
-  const uiType = isMenu ? UI_TYPE_MENU : isScroll ? UI_TYPE_SCROLL : UI_TYPE_CARD
+  const isDraw = screen.type === 'draw'
+  const uiType = isMenu ? UI_TYPE_MENU : isScroll ? UI_TYPE_SCROLL : isDraw ? UI_TYPE_CARD : UI_TYPE_CARD
 
   const dict = {
     msgType: MSG_TYPE_RENDER,
@@ -489,6 +491,11 @@ export function buildScreenRenderPacket(screen) {
     dict.items = encodeItems(screen.items)
     dict.actions = ''
     dict.body = screen.body ? String(screen.body) : ''
+  } else if (isDraw) {
+    const note = 'Browser emulator draw preview unavailable yet.'
+    const body = screen.body ? String(screen.body).trim() : ''
+    dict.body = `${note}${body ? ` ${body}` : ''}`.slice(0, 180)
+    dict.actions = ''
   } else {
     dict.body = screen.body ? String(screen.body).slice(0, isScroll ? 1024 : 180) : ''
     dict.actions = isScroll ? encodeMenuActions(screen.actions) : encodeActions(screen.actions)

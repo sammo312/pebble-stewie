@@ -213,7 +213,7 @@ export default function PebbleEmulator({
     if (sendTimerRef.current) clearTimeout(sendTimerRef.current)
     sendTimerRef.current = setTimeout(() => {
       sendScreenPacket(screen, `Sent screen "${screen.id}" to emulator`)
-    }, 180)
+    }, 32)
     return () => { if (sendTimerRef.current) clearTimeout(sendTimerRef.current) }
   }, [screen, state, sendScreenPacket])
 
@@ -441,7 +441,7 @@ export default function PebbleEmulator({
         <div className="emulator-display">
           <iframe
             ref={iframeRef}
-            src="/emulator/embed.html"
+            src="/emulator/embed.html?v=20260314e"
             className="emulator-iframe"
             allow="cross-origin-isolated"
             title="Pebble Emulator"

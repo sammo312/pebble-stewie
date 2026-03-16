@@ -67,6 +67,7 @@ var ACTION_FIELD_DEFS = [
   { id: 'id', type: 'text', required: true, maxLen: constants.MAX_ACTION_ID_LEN },
   { id: 'icon', type: 'enum', required: true, options: ACTION_ICONS },
   { id: 'label', type: 'text', required: false, maxLen: constants.MAX_OPTION_LABEL_LEN },
+  { id: 'labelTemplate', type: 'text', required: false },
   { id: 'value', type: 'text', required: false },
   { id: 'run.type', type: 'enum', required: false, options: RUN_TYPES },
   { id: 'run.screen', type: 'text', required: false },
@@ -79,6 +80,7 @@ var ACTION_FIELD_DEFS = [
 var MENU_ACTION_FIELD_DEFS = [
   { id: 'id', type: 'text', required: true, maxLen: constants.MAX_ACTION_ID_LEN },
   { id: 'label', type: 'text', required: true, maxLen: constants.MAX_OPTION_LABEL_LEN },
+  { id: 'labelTemplate', type: 'text', required: false },
   { id: 'value', type: 'text', required: false },
   { id: 'run.type', type: 'enum', required: false, options: RUN_TYPES },
   { id: 'run.screen', type: 'text', required: false },
@@ -89,7 +91,7 @@ var MENU_ACTION_FIELD_DEFS = [
 ];
 
 module.exports = {
-  schemaVersion: constants.SDUI_SCHEMA_VERSION,
+  schemaVersion: constants.SDUI_SCHEMA_VERSION_V1,
   enums: {
     screenTypes: SCREEN_TYPES,
     inputModes: INPUT_MODES,
@@ -114,10 +116,10 @@ module.exports = {
   },
   uiSections: {
     screen: [
-      { id: 'basic', title: 'Basic', defaultOpen: true, fields: ['id', 'type', 'title', 'body'] },
-      { id: 'dynamic', title: 'Dynamic Content', defaultOpen: false, fields: ['titleTemplate', 'bodyTemplate', 'bindings', 'input.mode'] }
+      { id: 'basic', title: 'Basic', defaultOpen: true, fields: ['id', 'type', 'title', 'body', 'input.mode'] },
+      { id: 'data', title: 'Data Sources', defaultOpen: false, fields: ['bindings'] }
     ],
-  menu: [
+    menu: [
       { id: 'items', title: 'Menu Items', defaultOpen: true, fields: ['items'] }
     ],
     card: [

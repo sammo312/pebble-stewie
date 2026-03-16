@@ -9,12 +9,15 @@ var staticScreens = require('./static-screens');
 var textUtils = require('./text-utils');
 var screenActions = require('./screen-actions');
 var graphSchema = require('./graph-schema');
+var drawCodec = require('./draw-codec');
 
 var MSG_TYPE_RENDER = constants.MSG_TYPE_RENDER;
 var MSG_TYPE_ACTION = constants.MSG_TYPE_ACTION;
 var UI_TYPE_MENU = constants.UI_TYPE_MENU;
 var UI_TYPE_CARD = constants.UI_TYPE_CARD;
 var UI_TYPE_SCROLL = constants.UI_TYPE_SCROLL;
+var UI_TYPE_DRAW = constants.UI_TYPE_DRAW;
+var UI_TYPE_VOICE = constants.UI_TYPE_VOICE;
 var ACTION_TYPE_READY = constants.ACTION_TYPE_READY;
 var ACTION_TYPE_SELECT = constants.ACTION_TYPE_SELECT;
 var ACTION_TYPE_BACK = constants.ACTION_TYPE_BACK;
@@ -30,7 +33,10 @@ var OPENAI_DEFAULT_MODEL = constants.OPENAI_DEFAULT_MODEL;
 var STORAGE_IMPORTED_SCHEMA_JSON = constants.STORAGE_IMPORTED_SCHEMA_JSON;
 var STORAGE_OPENAI_TOKEN = constants.STORAGE_OPENAI_TOKEN;
 var STORAGE_OPENAI_MODEL = constants.STORAGE_OPENAI_MODEL;
-var SDUI_SCHEMA_VERSION = constants.SDUI_SCHEMA_VERSION;
+var LATEST_SDUI_SCHEMA_VERSION = constants.LATEST_SDUI_SCHEMA_VERSION;
+var GRAPH_STORAGE_PREFIX = 'sdui-storage:';
+var MAX_GRAPH_STORAGE_BYTES = 4096;
+var MAX_HOOK_REDIRECTS = 8;
 
 var sanitizeText = textUtils.sanitizeText;
 var limitText = textUtils.limitText;
@@ -42,6 +48,7 @@ var encodeActions = screenActions.encodeActions;
 var encodeMenuActions = screenActions.encodeMenuActions;
 var buildActionLookup = screenActions.buildActionLookup;
 var encodeItems = screenActions.encodeItems;
+var encodeDrawingPayload = drawCodec.encodeDrawingPayload;
 
 var normalizeCanonicalGraph = graphSchema.normalizeCanonicalGraph;
 
@@ -58,9 +65,13 @@ var state = {
   history: [],
   currentCardActionsById: {},
   currentMenuActionsById: {},
+  vars: {},
+  screenTimerId: null,
+  screenTimerDeadline: 0,
   liveRenderTimer: null,
   pendingEffectVibe: '',
   pendingEffectLight: false,
+  pendingDictation: null,
   agent: {
     requestNonce: 0,
     activeRequest: null,
@@ -76,15 +87,17 @@ var OPENAI_SYSTEM_PROMPT = [
   'Respond with exactly one JSON object and no markdown.',
   'Schema:',
   '{',
-  '  "schemaVersion": "pebble.sdui.v1",',
+  '  "schemaVersion": "' + LATEST_SDUI_SCHEMA_VERSION + '",',
+  '  "storageNamespace": "optional_persist_id",',
   '  "entryScreenId": "root",',
   '  "screens": {',
   '    "root": {',
   '      "id": "root",',
-  '      "type": "menu" | "card" | "scroll",',
+  '      "type": "menu" | "card" | "scroll" | "draw",',
   '      "title": "short title",',
   '      "body": "short body",',
   '      "bodyTemplate": "optional {{binding.path}}",',
+  '      "titleTemplate": "optional {{var.key}} or {{binding.path}}",',
   '      "bindings": {',
   '        "time": { "source": "device.time", "live": true, "refreshMs": 30000 }',
   '      },',
@@ -96,12 +109,15 @@ var OPENAI_SYSTEM_PROMPT = [
   '      ],',
   '      "actions": [',
   '        { "slot": "select", "id": "confirm", "icon": "check", "label": "Confirm", "value": "confirm" }',
-  '      ]',
+  '      ],',
+  '      "onEnter": [{ "type": "effect", "vibe": "short" }],',
+  '      "onExit": [{ "type": "set_var", "key": "seen", "value": "true" }],',
+  '      "timer": { "durationMs": 5000, "run": { "type": "navigate", "screen": "next" } }',
   '    }',
   '  }',
   '}',
   'Constraints:',
-  '- schemaVersion must be pebble.sdui.v1',
+  '- schemaVersion must be ' + LATEST_SDUI_SCHEMA_VERSION,
   '- always return entryScreenId and screens',
   '- title <= 24 chars, body <= 140 chars (scroll body <= 1024 chars)',
   '- items <= 8, item labels <= 18 chars',
@@ -111,9 +127,18 @@ var OPENAI_SYSTEM_PROMPT = [
   '- action icon in play/pause/check/x/plus/minus',
   '- use items for menu screens, never options',
   '- action-menu items do not need slot or icon',
+  '- screens may include onEnter and onExit arrays of run actions',
+  '- screens may include timer { durationMs, run } for one-shot delayed actions',
   '- use run for effects, not next/agentPrompt/agentCommand',
+  '- run.type may be navigate, set_var, store, agent_prompt, agent_command, or effect',
+  '- run.type set_var requires key and value; value supports increment, decrement, toggle, true/false, numbers, or literal:text',
+  '- run.type store requires key and value; value may be plain text or templates like {{var.count}}',
+  '- run.type navigate may include condition { var, op, value }',
   '- run can include optional vibe (short/long/double) and light (true) for effects',
+  '- templates may reference {{var.name}} for session variables and {{storage.key}} for persisted strings',
+  '- templates may reference {{timer.remaining}} for timer countdown seconds',
   '- use scroll type for long text content that needs vertical scrolling',
+  '- draw screens require a drawing object with playMode, background, timelineMs, and 1-6 steps',
   '- return valid JSON only'
 ].join('\n');
 
@@ -163,7 +188,26 @@ function clearLiveRenderTimer() {
   state.liveRenderTimer = null;
 }
 
-function readBindingValue(binding) {
+function clearScreenTimer() {
+  if (!state.screenTimerId) {
+    state.screenTimerDeadline = 0;
+    return;
+  }
+
+  clearTimeout(state.screenTimerId);
+  state.screenTimerId = null;
+  state.screenTimerDeadline = 0;
+}
+
+function getScreenTimerRemainingSeconds() {
+  if (!state.screenTimerDeadline) {
+    return 0;
+  }
+
+  return Math.max(0, Math.ceil((state.screenTimerDeadline - Date.now()) / 1000));
+}
+
+function readBindingValue(binding, storage) {
   var source = binding && binding.source ? String(binding.source) : '';
   var now = new Date();
 
@@ -176,7 +220,228 @@ function readBindingValue(binding) {
     };
   }
 
+  if (source.indexOf('storage.') === 0) {
+    var storageKey = sanitizeVarKey(source.substring('storage.'.length));
+    if (!storageKey) {
+      return '';
+    }
+    return Object.prototype.hasOwnProperty.call(storage || {}, storageKey) ? storage[storageKey] : '';
+  }
+
   return '';
+}
+
+function sanitizeVarKey(key) {
+  var raw = sanitizeText(key).toLowerCase();
+  if (!raw) {
+    return '';
+  }
+
+  return raw.replace(/[^a-z0-9_-]/g, '_').replace(/^_+/, '').replace(/_+$/, '');
+}
+
+function shortHash(value) {
+  var text = String(value || '');
+  var hash = 5381;
+  for (var i = 0; i < text.length; i++) {
+    hash = ((hash << 5) + hash + text.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(16);
+}
+
+function getUtf8ByteLength(value) {
+  try {
+    return unescape(encodeURIComponent(String(value || ''))).length;
+  } catch (error) {
+    return String(value || '').length;
+  }
+}
+
+function getGraphStorageNamespace(graph) {
+  var explicitNamespace = sanitizeVarKey(graph && graph.storageNamespace);
+  if (explicitNamespace) {
+    return explicitNamespace;
+  }
+
+  if (!graph || !graph.screens || !graph.entryScreenId) {
+    return '';
+  }
+
+  return 'graph_' + shortHash(JSON.stringify({
+    entryScreenId: graph.entryScreenId,
+    screens: graph.screens
+  })).slice(0, 8);
+}
+
+function getGraphStorageKey(graph) {
+  var storageNamespace = getGraphStorageNamespace(graph);
+  if (!storageNamespace) {
+    return '';
+  }
+  return GRAPH_STORAGE_PREFIX + storageNamespace;
+}
+
+function readGraphStorageMap(graph) {
+  var storageKey = getGraphStorageKey(graph);
+  if (!storageKey) {
+    return {};
+  }
+
+  var raw = localStorage.getItem(storageKey) || '';
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    var parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed;
+  } catch (error) {
+    console.log('Stored graph data parse failed:', error && error.message ? error.message : error);
+    return {};
+  }
+}
+
+function writeGraphStorageMap(graph, nextStorage) {
+  var storageKey = getGraphStorageKey(graph);
+  if (!storageKey) {
+    return false;
+  }
+
+  var data = nextStorage && typeof nextStorage === 'object' ? nextStorage : {};
+  var keys = Object.keys(data);
+  if (keys.length === 0) {
+    localStorage.removeItem(storageKey);
+    return true;
+  }
+
+  var serialized = JSON.stringify(data);
+  if (getUtf8ByteLength(serialized) > MAX_GRAPH_STORAGE_BYTES) {
+    console.log('Stored graph data exceeds limit for namespace:', getGraphStorageNamespace(graph));
+    return false;
+  }
+
+  localStorage.setItem(storageKey, serialized);
+  return true;
+}
+
+function parseConditionValue(rawValue) {
+  var text = sanitizeText(rawValue);
+  if (!text) {
+    return '';
+  }
+
+  if (text === 'true') {
+    return true;
+  }
+
+  if (text === 'false') {
+    return false;
+  }
+
+  if (/^-?\d+(\.\d+)?$/.test(text)) {
+    return Number(text);
+  }
+
+  return text;
+}
+
+function evaluateRunCondition(condition) {
+  if (!condition || typeof condition !== 'object') {
+    return true;
+  }
+
+  var key = sanitizeVarKey(condition.var);
+  var op = sanitizeText(condition.op).toLowerCase();
+  if (!key || !op) {
+    return false;
+  }
+
+  var left = state.vars[key];
+  var right = parseConditionValue(condition.value);
+  var leftNumber = Number(left);
+  var rightNumber = Number(right);
+  var numbersComparable = !isNaN(leftNumber) && !isNaN(rightNumber);
+
+  if (op === 'eq') {
+    return String(left === undefined || left === null ? '' : left) ===
+      String(right === undefined || right === null ? '' : right);
+  }
+
+  if (op === 'neq') {
+    return String(left === undefined || left === null ? '' : left) !==
+      String(right === undefined || right === null ? '' : right);
+  }
+
+  if (!numbersComparable) {
+    return false;
+  }
+
+  if (op === 'gt') {
+    return leftNumber > rightNumber;
+  }
+  if (op === 'gte') {
+    return leftNumber >= rightNumber;
+  }
+  if (op === 'lt') {
+    return leftNumber < rightNumber;
+  }
+  if (op === 'lte') {
+    return leftNumber <= rightNumber;
+  }
+
+  return false;
+}
+
+function applySetVar(run) {
+  if (!run || typeof run !== 'object') {
+    return false;
+  }
+
+  var key = sanitizeVarKey(run.key);
+  var valueSpec = sanitizeText(run.value);
+  if (!key || !valueSpec) {
+    return false;
+  }
+
+  var current = state.vars[key];
+  var nextValue = valueSpec;
+
+  if (valueSpec === 'increment') {
+    var incrementBase = Number(current);
+    nextValue = !isNaN(incrementBase) ? incrementBase + 1 : 1;
+  } else if (valueSpec === 'decrement') {
+    var decrementBase = Number(current);
+    nextValue = !isNaN(decrementBase) ? decrementBase - 1 : -1;
+  } else if (valueSpec === 'toggle') {
+    nextValue = !(current === true || String(current).toLowerCase() === 'true');
+  } else if (valueSpec.indexOf('literal:') === 0) {
+    nextValue = valueSpec.substring('literal:'.length);
+  } else if (valueSpec === 'true') {
+    nextValue = true;
+  } else if (valueSpec === 'false') {
+    nextValue = false;
+  } else if (/^-?\d+(\.\d+)?$/.test(valueSpec)) {
+    nextValue = Number(valueSpec);
+  }
+
+  state.vars[key] = nextValue;
+  return true;
+}
+
+function queueRunEffects(run) {
+  if (!run || typeof run !== 'object') {
+    return;
+  }
+
+  if (run.vibe) {
+    state.pendingEffectVibe = String(run.vibe);
+  }
+  if (run.light) {
+    state.pendingEffectLight = true;
+  }
 }
 
 function resolvePathValue(context, path) {
@@ -211,21 +476,24 @@ function renderTemplate(template, context) {
   });
 }
 
-function applyScreenBindings(screen) {
-  if (!screen || typeof screen !== 'object') {
-    return { screen: screen, refreshMs: 0 };
-  }
-
-  var bindings = screen.bindings || {};
+function buildTemplateContext(screen) {
+  var bindings = screen && screen.bindings && typeof screen.bindings === 'object' ? screen.bindings : {};
   var bindingKeys = Object.keys(bindings);
-  var context = {};
+  var storage = readGraphStorageMap(state.activeGraph);
+  var context = {
+    var: state.vars,
+    storage: storage,
+    timer: {
+      remaining: getScreenTimerRemainingSeconds()
+    }
+  };
   var refreshMs = 0;
   var i;
 
   for (i = 0; i < bindingKeys.length; i++) {
     var bindingKey = bindingKeys[i];
     var binding = bindings[bindingKey];
-    context[bindingKey] = readBindingValue(binding);
+    context[bindingKey] = readBindingValue(binding, storage);
 
     if (binding && binding.live) {
       var candidateRefresh = parseNumber(binding.refreshMs, 0);
@@ -234,6 +502,46 @@ function applyScreenBindings(screen) {
       }
     }
   }
+
+  return {
+    context: context,
+    refreshMs: refreshMs
+  };
+}
+
+function resolveRunValue(rawValue, screen) {
+  var template = rawValue === undefined || rawValue === null ? '' : String(rawValue);
+  if (!template) {
+    return '';
+  }
+
+  return renderTemplate(template, buildTemplateContext(screen).context);
+}
+
+function applyStore(run, screen) {
+  if (!run || typeof run !== 'object') {
+    return false;
+  }
+
+  var key = sanitizeVarKey(run.key);
+  var rawValue = run.value === undefined || run.value === null ? '' : String(run.value);
+  if (!key || !rawValue) {
+    return false;
+  }
+
+  var nextStorage = readGraphStorageMap(state.activeGraph);
+  nextStorage[key] = resolveRunValue(rawValue, screen || state.currentScreenDefinition || state.currentRenderedScreen || {});
+  return writeGraphStorageMap(state.activeGraph, nextStorage);
+}
+
+function applyScreenBindings(screen) {
+  if (!screen || typeof screen !== 'object') {
+    return { screen: screen, refreshMs: 0 };
+  }
+
+  var preparedContext = buildTemplateContext(screen);
+  var context = preparedContext.context;
+  var refreshMs = preparedContext.refreshMs;
 
   var resolved = {};
   for (var key in screen) {
@@ -263,6 +571,22 @@ function applyScreenBindings(screen) {
         nextItem.label = renderTemplate(item.labelTemplate, context);
       }
       return nextItem;
+    });
+  }
+
+  if (screen.actions && screen.actions.length) {
+    resolved.actions = screen.actions.map(function(action) {
+      var nextAction = {};
+      for (var actionKey in action) {
+        if (Object.prototype.hasOwnProperty.call(action, actionKey)) {
+          nextAction[actionKey] = action[actionKey];
+        }
+      }
+
+      if (action.labelTemplate) {
+        nextAction.label = renderTemplate(action.labelTemplate, context);
+      }
+      return nextAction;
     });
   }
 
@@ -317,8 +641,32 @@ function scheduleLiveRender(screenId, refreshMs) {
       return;
     }
 
-    sendRender(liveScreen);
+    sendRender(liveScreen, { resetTimer: false });
   }, refreshMs);
+}
+
+function syncScreenTimer(screen, resetTimer) {
+  var timer = screen && screen.timer && typeof screen.timer === 'object' ? screen.timer : null;
+  var durationMs = parseNumber(timer && timer.durationMs, 0);
+  if (!timer || !timer.run || durationMs <= 0) {
+    clearScreenTimer();
+    return;
+  }
+
+  if (!resetTimer && state.screenTimerDeadline > 0) {
+    return;
+  }
+
+  clearScreenTimer();
+  state.screenTimerDeadline = Date.now() + durationMs;
+  state.screenTimerId = setTimeout(function() {
+    state.screenTimerId = null;
+    state.screenTimerDeadline = 0;
+    if (state.currentScreenId !== screen.id) {
+      return;
+    }
+    executeTypedAction(timer.run, 'screen_timer');
+  }, durationMs);
 }
 
 function executeTypedAction(run, source) {
@@ -331,18 +679,15 @@ function executeTypedAction(run, source) {
     return false;
   }
 
-  if (run.vibe) {
-    state.pendingEffectVibe = String(run.vibe);
-  }
-  if (run.light) {
-    state.pendingEffectLight = true;
-  }
-
   if (type === 'navigate') {
     var targetScreen = String(run.screen || '');
     if (!targetScreen) {
       return false;
     }
+    if (!evaluateRunCondition(run.condition)) {
+      return true;
+    }
+    queueRunEffects(run);
     if (!transitionTo(targetScreen, true)) {
       state.pendingEffectVibe = '';
       state.pendingEffectLight = false;
@@ -361,12 +706,14 @@ function executeTypedAction(run, source) {
     if (!prompt) {
       return false;
     }
+    queueRunEffects(run);
     submitAgentTextInput(prompt, source || 'schema_action');
     return true;
   }
 
   if (type === 'agent_command') {
     if (String(run.command || '') === 'reset') {
+      queueRunEffects(run);
       resetAgentConversation(true);
       renderAgentStatusCard('Agent', 'Thread reset.');
       return true;
@@ -374,34 +721,130 @@ function executeTypedAction(run, source) {
     return false;
   }
 
-  if (type === 'effect') {
+  if (type === 'set_var') {
+    if (!applySetVar(run)) {
+      return false;
+    }
+    queueRunEffects(run);
     if (state.currentScreenDefinition) {
-      sendRender(state.currentScreenDefinition);
+      sendRender(state.currentScreenDefinition, { resetTimer: false });
+    }
+    return true;
+  }
+
+  if (type === 'store') {
+    if (!sanitizeVarKey(run.key) || run.value === undefined || run.value === null || String(run.value) === '') {
+      return false;
+    }
+    if (!applyStore(run, state.currentScreenDefinition || state.currentRenderedScreen || {})) {
+      return true;
+    }
+    queueRunEffects(run);
+    if (state.currentScreenDefinition) {
+      sendRender(state.currentScreenDefinition, { resetTimer: false });
+    }
+    return true;
+  }
+
+  if (type === 'effect') {
+    queueRunEffects(run);
+    if (state.currentScreenDefinition) {
+      sendRender(state.currentScreenDefinition, { resetTimer: false });
       return true;
     }
     return false;
   }
 
+  if (type === 'dictation') {
+    var dictVar = sanitizeVarKey(run.variable);
+    if (!dictVar) {
+      return false;
+    }
+    queueRunEffects(run);
+    state.pendingDictation = { variable: dictVar, screen: String(run.screen || ''), then: run.then || null };
+    pushCurrentHistoryEntry();
+    sendRender({
+      id: '__dictation__',
+      type: 'voice',
+      title: 'Listening...',
+      variable: dictVar
+    });
+    return true;
+  }
+
   return false;
 }
 
-function sendRender(screen) {
+function executeHookRun(run, screen) {
+  if (!run || typeof run !== 'object' || !run.type) {
+    return '';
+  }
+
+  if (run.type === 'navigate') {
+    if (!evaluateRunCondition(run.condition)) {
+      return '';
+    }
+    return String(run.screen || '');
+  }
+
+  if (run.type === 'set_var') {
+    if (applySetVar(run)) {
+      queueRunEffects(run);
+    }
+    return '';
+  }
+
+  if (run.type === 'store') {
+    if (sanitizeVarKey(run.key) && run.value !== undefined && run.value !== null && String(run.value) !== '') {
+      if (applyStore(run, screen || {})) {
+        queueRunEffects(run);
+      }
+    }
+    return '';
+  }
+
+  if (run.type === 'effect') {
+    queueRunEffects(run);
+  }
+
+  return '';
+}
+
+function executeHookRuns(runs, screen) {
+  var redirect = '';
+  var hookRuns = Array.isArray(runs) ? runs : [];
+
+  for (var i = 0; i < hookRuns.length; i++) {
+    var nextRedirect = executeHookRun(hookRuns[i], screen);
+    if (nextRedirect) {
+      redirect = nextRedirect;
+    }
+  }
+
+  return redirect;
+}
+
+function sendRender(screen, options) {
   if (!screen) {
     return;
   }
 
+  var resetTimer = !options || options.resetTimer !== false;
   clearLiveRenderTimer();
   state.currentScreenDefinition = screen;
+  syncScreenTimer(screen, resetTimer);
 
   var prepared = applyScreenBindings(screen);
   screen = prepareScreenForRender(prepared.screen);
 
   var isMenu = screen.type === 'menu';
   var isScroll = screen.type === 'scroll';
+  var isDraw = screen.type === 'draw';
   var isCard = screen.type === 'card';
+  var isVoice = screen.type === 'voice';
   var normalizedMenuActions = isScroll ? normalizeMenuActions(screen.actions || []) : [];
   var normalizedActions = isCard ? normalizeScreenActions(screen.actions || []) : [];
-  var uiType = isMenu ? UI_TYPE_MENU : (isScroll ? UI_TYPE_SCROLL : UI_TYPE_CARD);
+  var uiType = isVoice ? UI_TYPE_VOICE : (isMenu ? UI_TYPE_MENU : (isScroll ? UI_TYPE_SCROLL : (isDraw ? UI_TYPE_DRAW : UI_TYPE_CARD)));
   var payload = {
     msgType: MSG_TYPE_RENDER,
     uiType: uiType,
@@ -409,10 +852,23 @@ function sendRender(screen) {
     title: limitText(screen.title || 'Screen', MAX_TITLE_LEN)
   };
 
-  if (isMenu) {
+  if (isVoice) {
+    payload.body = '';
+    payload.actions = '';
+    state.currentRenderedScreen = screen;
+    state.currentCardActionsById = {};
+    state.currentMenuActionsById = {};
+  } else if (isMenu) {
     payload.items = encodeItems(screen.items);
     payload.actions = '';
     payload.body = screen.body ? String(screen.body) : '';
+    state.currentRenderedScreen = screen;
+    state.currentCardActionsById = {};
+    state.currentMenuActionsById = {};
+  } else if (isDraw) {
+    payload.body = screen.body ? limitText(screen.body, MAX_BODY_LEN) : '';
+    payload.actions = '';
+    payload.drawing = encodeDrawingPayload(screen.drawing);
     state.currentRenderedScreen = screen;
     state.currentCardActionsById = {};
     state.currentMenuActionsById = {};
@@ -450,18 +906,25 @@ function sendRender(screen) {
   );
 
   state.currentScreenId = screen.id;
-  scheduleLiveRender(screen.id, prepared.refreshMs);
+  var refreshMs = prepared.refreshMs;
+  if (screen.timer && state.screenTimerDeadline > 0) {
+    refreshMs = refreshMs > 0 ? Math.min(refreshMs, 1000) : 1000;
+  }
+  scheduleLiveRender(screen.id, refreshMs);
 }
 
 function renderGraphScreen(graph, source, screenId, pushHistory) {
-  var nextScreen = resolveScreenInGraph(graph, screenId);
-  if (!nextScreen) {
-    console.log('Unknown screen id:', screenId);
-    return false;
-  }
-
+  var targetScreenId = screenId;
+  var currentScreen = state.currentScreenDefinition;
   if (pushHistory) {
     pushCurrentHistoryEntry();
+  }
+
+  if (currentScreen && Array.isArray(currentScreen.onExit) && currentScreen.onExit.length) {
+    var exitRedirect = executeHookRuns(currentScreen.onExit, currentScreen);
+    if (exitRedirect) {
+      targetScreenId = exitRedirect;
+    }
   }
 
   if (state.activeGraphSource === 'agent' && source !== 'agent') {
@@ -469,8 +932,30 @@ function renderGraphScreen(graph, source, screenId, pushHistory) {
   }
 
   setActiveGraph(graph, source);
-  sendRender(nextScreen);
-  return true;
+
+  for (var redirectCount = 0; redirectCount <= MAX_HOOK_REDIRECTS; redirectCount++) {
+    var nextScreen = resolveScreenInGraph(graph, targetScreenId);
+    if (!nextScreen) {
+      console.log('Unknown screen id:', targetScreenId);
+      return false;
+    }
+
+    if (!Array.isArray(nextScreen.onEnter) || nextScreen.onEnter.length === 0) {
+      sendRender(nextScreen);
+      return true;
+    }
+
+    var enterRedirect = executeHookRuns(nextScreen.onEnter, nextScreen);
+    if (!enterRedirect || enterRedirect === targetScreenId) {
+      sendRender(nextScreen);
+      return true;
+    }
+
+    targetScreenId = enterRedirect;
+  }
+
+  console.log('Lifecycle redirect loop detected for:', screenId);
+  return false;
 }
 
 function transitionTo(screenId, pushHistory) {
@@ -695,7 +1180,7 @@ function buildConfigurationUrl() {
     '</head><body>',
     '<h3>SDUI Import Setup</h3>',
     '<label>Schema JSON</label>',
-    '<textarea id="schema" placeholder="{&quot;schemaVersion&quot;:&quot;pebble.sdui.v1&quot;,&quot;entryScreenId&quot;:&quot;root&quot;,&quot;screens&quot;:{...}}">', escapeHtml(existingSchema), '</textarea>',
+    '<textarea id="schema" placeholder="{&quot;schemaVersion&quot;:&quot;', escapeHtml(LATEST_SDUI_SCHEMA_VERSION), '&quot;,&quot;entryScreenId&quot;:&quot;root&quot;,&quot;screens&quot;:{...}}">', escapeHtml(existingSchema), '</textarea>',
     '<label>OpenAI API Key</label>',
     '<input id="token" type="password" placeholder="sk-..." value="', escapeHtml(existingToken), '"/>',
     '<label>OpenAI Model</label>',
@@ -796,11 +1281,13 @@ function postJson(url, token, body, onDone) {
 
 function buildOpenAIContext(userText, reason) {
   return {
-    schemaVersion: SDUI_SCHEMA_VERSION,
+    schemaVersion: LATEST_SDUI_SCHEMA_VERSION,
     conversationId: state.agent.conversationId || '',
     reason: sanitizeText(reason || 'user_input'),
     input: sanitizeText(userText || ''),
     tzOffset: -(new Date()).getTimezoneOffset(),
+    vars: state.vars,
+    storage: readGraphStorageMap(state.activeGraph),
     watch: getWatchProfile()
   };
 }
@@ -1120,6 +1607,37 @@ function handleSelect(action) {
 }
 
 function handleVoiceAction(action) {
+  // Handle pending dictation from a run action
+  var pending = state.pendingDictation;
+  if (pending && pending.variable) {
+    state.pendingDictation = null;
+    if (action.itemId === VOICE_NOT_SUPPORTED_ITEM_ID || action.itemId === VOICE_ERROR_ITEM_ID) {
+      handleBack();
+      return;
+    }
+
+    var transcript = sanitizeText(action.text);
+    if (!transcript) {
+      handleBack();
+      return;
+    }
+
+    applySetVar({ type: 'set_var', key: pending.variable, value: 'literal:' + transcript });
+
+    if (pending.then && pending.then.type) {
+      if (!executeTypedAction(pending.then, 'dictation_then')) {
+        handleBack();
+      }
+    } else if (pending.screen) {
+      if (!transitionTo(pending.screen, false)) {
+        handleBack();
+      }
+    } else {
+      handleBack();
+    }
+    return;
+  }
+
   if (action.itemId === VOICE_NOT_SUPPORTED_ITEM_ID) {
     sendRender({
       id: 'voice-unsupported',
@@ -1145,9 +1663,54 @@ function handleVoiceAction(action) {
     return;
   }
 
-  // Non-agent voice: show transcript as a scroll screen
-  var transcript = sanitizeText(action.text);
-  if (!transcript) {
+  // Check if the current screen's __voice__ item has a dictation run config
+  var voiceTranscript = sanitizeText(action.text);
+  var currentDef = state.currentScreenDefinition;
+  if (currentDef && Array.isArray(currentDef.items)) {
+    var voiceItem = null;
+    for (var vi = 0; vi < currentDef.items.length; vi++) {
+      if (currentDef.items[vi] && currentDef.items[vi].id === VOICE_INPUT_ITEM_ID) {
+        voiceItem = currentDef.items[vi];
+        break;
+      }
+    }
+    if (voiceItem && voiceItem.run && voiceItem.run.type === 'dictation') {
+      if (!voiceTranscript) {
+        handleBack();
+        return;
+      }
+      var itemDictVar = sanitizeVarKey(voiceItem.run.variable);
+      if (itemDictVar) {
+        applySetVar({ type: 'set_var', key: itemDictVar, value: 'literal:' + voiceTranscript });
+      }
+      if (voiceItem.run.then && voiceItem.run.then.type) {
+        var thenRun = voiceItem.run.then;
+        // Interpolate variable references in the then run's prompt
+        if (thenRun.type === 'agent_prompt' && thenRun.prompt && itemDictVar) {
+          thenRun = {
+            type: 'agent_prompt',
+            prompt: thenRun.prompt.replace('{{var.' + itemDictVar + '}}', voiceTranscript)
+          };
+          if (voiceItem.run.then.vibe) { thenRun.vibe = voiceItem.run.then.vibe; }
+          if (voiceItem.run.then.light) { thenRun.light = voiceItem.run.then.light; }
+        }
+        if (executeTypedAction(thenRun, 'dictation_then')) {
+          return;
+        }
+      }
+      if (voiceItem.run.screen) {
+        pushCurrentHistoryEntry();
+        if (transitionTo(voiceItem.run.screen, false)) {
+          return;
+        }
+      }
+      handleBack();
+      return;
+    }
+  }
+
+  // Fallback: show transcript as a scroll screen
+  if (!voiceTranscript) {
     sendRender({
       id: 'voice-empty',
       type: 'card',
@@ -1162,7 +1725,7 @@ function handleVoiceAction(action) {
     id: 'voice-result',
     type: 'scroll',
     title: 'Voice Input',
-    body: limitText(transcript, MAX_SCROLL_BODY_LEN)
+    body: limitText(voiceTranscript, MAX_SCROLL_BODY_LEN)
   });
 }
 
@@ -1186,6 +1749,8 @@ function handleActionMessage(payload) {
 
   if (actionType === ACTION_TYPE_READY) {
     state.history = [];
+    state.vars = {};
+    clearScreenTimer();
     resetAgentConversation(false);
     if (!tryRenderImportedSchemaFromStorage()) {
       activateGraph(staticScreens, 'static', false);
