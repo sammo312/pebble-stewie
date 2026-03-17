@@ -1,8 +1,8 @@
 'use client'
 
 import { useMemo } from 'react'
-import ReactFlow, { Background, Controls } from 'reactflow'
-import 'reactflow/dist/style.css'
+import { ReactFlow, Background, Controls } from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import '../graph.css'
 import PebbleNode from './graph/pebble-node'
 import RunTargetNode from './graph/run-target-node'
@@ -23,8 +23,7 @@ export default function CanvasPanel({
   setSelectedScreenId,
   jumpPreviewTo,
   addScreen,
-  addRunTargetNode,
-  openCommandPalette
+  addRunTargetNode
 }) {
   const nodeTypes = useMemo(() => ({ pebble: PebbleNode, runTarget: RunTargetNode }), [])
   const edgeTypes = useMemo(() => ({ canvas: CanvasEdge }), [])
@@ -36,7 +35,6 @@ export default function CanvasPanel({
           graphBuilderSpec={graphBuilderSpec}
           addScreen={addScreen}
           addRunTargetNode={addRunTargetNode}
-          openCommandPalette={openCommandPalette}
         />
         <ReactFlow
           nodes={nodes}

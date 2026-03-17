@@ -1,6 +1,6 @@
 'use client'
 
-import { Command, Plus, Workflow } from 'lucide-react'
+import { Plus, Workflow } from 'lucide-react'
 import { Button } from '@/app/components/ui/button'
 import {
   DropdownMenu,
@@ -16,8 +16,7 @@ import { RUN_TARGETS, SCREEN_TYPE_ICONS } from '@/app/lib/constants'
 export default function CanvasPalette({
   graphBuilderSpec,
   addScreen,
-  addRunTargetNode,
-  openCommandPalette
+  addRunTargetNode
 }) {
   const allowedScreenTypes = new Set(graphBuilderSpec?.enums?.screenTypes || ['menu', 'card', 'scroll'])
   const allowedRunTypes = new Set(graphBuilderSpec?.enums?.runTypes || [])
@@ -75,15 +74,6 @@ export default function CanvasPalette({
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={openCommandPalette}
-        className="border-line/80 bg-black/70 text-ink-dim hover:bg-panel-soft hover:text-ink"
-      >
-        <Command className="size-3.5" /> Command
-      </Button>
     </div>
   )
 }

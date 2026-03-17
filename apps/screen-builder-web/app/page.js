@@ -13,6 +13,7 @@ import { Toaster, toast } from './components/ui/sonner'
 export default function Page() {
   const editor = useGraphEditor()
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [mobileTab, setMobileTab] = useState('graph')
   const [previewOffset, setPreviewOffset] = useState({ x: 0, y: 0 })
   const [isPreviewDragging, setIsPreviewDragging] = useState(false)
   const [isPreviewNearDock, setIsPreviewNearDock] = useState(false)
@@ -20,10 +21,6 @@ export default function Page() {
   const dragStateRef = useRef(null)
   const lastToastKeyRef = useRef(`${editor.notice.type}:${editor.notice.text}`)
   const isPreviewDocked = previewOffset.x === 0 && previewOffset.y === 0
-  const isWithinDockZone = useCallback((clientX, clientY) => {
-    if (typeof window === 'undefined') return false
-    return clientX >= window.innerWidth - 460 && clientY <= 300
-  }, [])
 
   useEffect(() => {
     previewOffsetRef.current = previewOffset
@@ -38,22 +35,16 @@ export default function Page() {
         y: drag.originY + (event.clientY - drag.startY)
       }
       setPreviewOffset(nextOffset)
-      setIsPreviewNearDock(
-        (Math.abs(nextOffset.x) <= 72 && Math.abs(nextOffset.y) <= 72) ||
-        isWithinDockZone(event.clientX, event.clientY)
-      )
+      setIsPreviewNearDock(Math.abs(nextOffset.x) <= 72 && Math.abs(nextOffset.y) <= 72)
     }
 
-    function handlePointerEnd(event) {
+    function handlePointerEnd() {
       if (!dragStateRef.current) return
       const nextOffset = previewOffsetRef.current
       dragStateRef.current = null
       setIsPreviewDragging(false)
-      const shouldDock =
-        (Math.abs(nextOffset.x) <= 72 && Math.abs(nextOffset.y) <= 72) ||
-        isWithinDockZone(event.clientX, event.clientY)
       setIsPreviewNearDock(false)
-      if (shouldDock) {
+      if (Math.abs(nextOffset.x) <= 72 && Math.abs(nextOffset.y) <= 72) {
         setPreviewOffset({ x: 0, y: 0 })
       }
     }
@@ -66,7 +57,7 @@ export default function Page() {
       window.removeEventListener('pointerup', handlePointerEnd)
       window.removeEventListener('pointercancel', handlePointerEnd)
     }
-  }, [isWithinDockZone])
+  }, [])
 
   const startPreviewDrag = useCallback((event) => {
     event.preventDefault()
@@ -109,7 +100,7 @@ export default function Page() {
   }, [editor.notice])
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-bottom)]">
+    <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg-bottom)]">
       <Toolbar
         graph={editor.graph}
         graphBuilderSpec={editor.graphBuilderSpec}
@@ -129,27 +120,54 @@ export default function Page() {
         openCommandPalette={() => setCommandPaletteOpen(true)}
       />
 
-      <main className="relative flex flex-1 min-h-0 overflow-hidden">
-        <CanvasPanel
-          graphBuilderSpec={editor.graphBuilderSpec}
-          nodes={editor.nodes}
-          edges={editor.edges}
-          handleNodesChange={editor.handleNodesChange}
-          handleConnect={editor.handleConnect}
-          handleEdgesDelete={editor.handleEdgesDelete}
-          clearLinkByHandle={editor.clearLinkByHandle}
-          setFlowInstance={editor.setFlowInstance}
-          setSelectedNodeId={editor.setSelectedNodeId}
-          setSelectedScreenId={editor.setSelectedScreenId}
-          jumpPreviewTo={editor.jumpPreviewTo}
-          addScreen={editor.addScreen}
-          addRunTargetNode={editor.addRunTargetNode}
-          openCommandPalette={() => setCommandPaletteOpen(true)}
-        />
+      {/* Mobile segmented control */}
+      <div className="flex border-b border-line/70 md:hidden">
+        <button
+          type="button"
+          className={`flex-1 py-2 text-center font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+            mobileTab === 'graph'
+              ? 'border-b-2 border-ink bg-card text-ink'
+              : 'bg-panel-soft/50 text-ink-dim'
+          }`}
+          onClick={() => setMobileTab('graph')}
+        >
+          Graph
+        </button>
+        <button
+          type="button"
+          className={`flex-1 py-2 text-center font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+            mobileTab === 'preview'
+              ? 'border-b-2 border-ink bg-card text-ink'
+              : 'bg-panel-soft/50 text-ink-dim'
+          }`}
+          onClick={() => setMobileTab('preview')}
+        >
+          Preview
+        </button>
+      </div>
 
-        <div className="pointer-events-none absolute right-4 top-4 bottom-4 z-20 w-[22rem]">
+      <main className="relative flex min-h-0 flex-1 overflow-hidden">
+        {/* Canvas + floating preview */}
+        <div className={`relative min-h-0 min-w-0 flex-1 ${mobileTab === 'graph' ? '' : 'hidden md:block'}`}>
+          <CanvasPanel
+            graphBuilderSpec={editor.graphBuilderSpec}
+            nodes={editor.nodes}
+            edges={editor.edges}
+            handleNodesChange={editor.handleNodesChange}
+            handleConnect={editor.handleConnect}
+            handleEdgesDelete={editor.handleEdgesDelete}
+            clearLinkByHandle={editor.clearLinkByHandle}
+            setFlowInstance={editor.setFlowInstance}
+            setSelectedNodeId={editor.setSelectedNodeId}
+            setSelectedScreenId={editor.setSelectedScreenId}
+            jumpPreviewTo={editor.jumpPreviewTo}
+            addScreen={editor.addScreen}
+            addRunTargetNode={editor.addRunTargetNode}
+          />
+
+          {/* Floating emulator — top left, grabbable, desktop only */}
           <div
-            className={`pointer-events-auto absolute right-0 top-0 z-30 ${isPreviewDragging ? '' : 'transition-[transform,width] duration-150 ease-out'} ${isPreviewDocked ? 'w-[22rem]' : 'w-[26rem]'} ${isPreviewNearDock ? 'ring-1 ring-ring/60' : ''}`}
+            className={`pointer-events-auto absolute left-4 top-14 z-20 hidden md:block ${isPreviewDragging ? '' : 'transition-transform duration-150 ease-out'} ${isPreviewNearDock ? 'ring-1 ring-ring/60' : ''}`}
             style={{ transform: `translate(${previewOffset.x}px, ${previewOffset.y}px)` }}
           >
             <PreviewPanel
@@ -163,61 +181,74 @@ export default function Page() {
               onHandleDoubleClick={resetPreviewDock}
             />
           </div>
+        </div>
 
-          <div className={`pointer-events-auto absolute inset-x-0 bottom-0 overflow-hidden ${isPreviewDocked ? 'top-[24rem]' : 'top-0'}`}>
-            <InspectorPanel
-              selectedNodeId={editor.selectedNodeId}
-              selectedScreen={editor.selectedScreen}
-              selectedRunTarget={editor.selectedRunTarget}
-              selectedNodeUsages={editor.selectedNodeUsages}
-              screenIds={editor.screenIds}
-              graphReferenceCatalog={editor.graphReferenceCatalog}
-              screenBuilderSpec={editor.screenBuilderSpec}
-              graphBuilderSpec={editor.graphBuilderSpec}
-              updateScreenField={editor.updateScreenField}
-              addMenuItem={editor.addMenuItem}
-              removeMenuItem={editor.removeMenuItem}
-              updateMenuItem={editor.updateMenuItem}
-              addScreenHook={editor.addScreenHook}
-              removeScreenHook={editor.removeScreenHook}
-              updateScreenHook={editor.updateScreenHook}
-              toggleScreenTimer={editor.toggleScreenTimer}
-              updateScreenTimer={editor.updateScreenTimer}
-              addScreenAction={editor.addScreenAction}
-              removeScreenAction={editor.removeScreenAction}
-              updateScreenAction={editor.updateScreenAction}
-              updateCanvasTemplate={editor.updateCanvasTemplate}
-              updateCanvasHeader={editor.updateCanvasHeader}
-              addCanvasItem={editor.addCanvasItem}
-              removeCanvasItem={editor.removeCanvasItem}
-              updateCanvasItem={editor.updateCanvasItem}
-              updateMotionField={editor.updateMotionField}
-              addMotionTrack={editor.addMotionTrack}
-              removeMotionTrack={editor.removeMotionTrack}
-              updateMotionTrack={editor.updateMotionTrack}
-              detachMotionToRaw={editor.detachMotionToRaw}
-              enablePresetMotion={editor.enablePresetMotion}
-              updateDrawField={editor.updateDrawField}
-              addDrawStep={editor.addDrawStep}
-              removeDrawStep={editor.removeDrawStep}
-              updateDrawStep={editor.updateDrawStep}
-              getBindingsDraft={editor.getBindingsDraft}
-              updateBindingsDraft={editor.updateBindingsDraft}
-              commitBindingsDraft={editor.commitBindingsDraft}
-              applyBindingsPreset={editor.applyBindingsPreset}
-              ensureCurrentScreenBinding={editor.ensureCurrentScreenBinding}
-              addVariable={editor.addVariable}
-              removeVariable={editor.removeVariable}
-              updateVariable={editor.updateVariable}
-              addStorageKey={editor.addStorageKey}
-              removeStorageKey={editor.removeStorageKey}
-              updateStorageKey={editor.updateStorageKey}
-              declareFromUndeclared={editor.declareFromUndeclared}
-              addDataItem={editor.addDataItem}
-              removeDataItem={editor.removeDataItem}
-              updateDataItem={editor.updateDataItem}
-            />
-          </div>
+        {/* Mobile: Preview tab */}
+        <div className={`flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto p-4 md:hidden ${mobileTab === 'preview' ? '' : 'hidden'}`}>
+          <PreviewPanel
+            previewRenderedScreen={editor.previewRenderedScreen}
+            previewScreen={editor.previewScreen}
+            previewScreenId={editor.previewScreenId}
+            previewRevision={editor.previewRevision}
+            handlePreviewActionMessage={editor.handlePreviewActionMessage}
+            setNotice={editor.setNotice}
+          />
+        </div>
+
+        {/* Right: Inspector — desktop only */}
+        <div className="hidden w-[22rem] shrink-0 border-l border-line/70 md:flex md:flex-col">
+          <InspectorPanel
+            selectedNodeId={editor.selectedNodeId}
+            selectedScreen={editor.selectedScreen}
+            selectedRunTarget={editor.selectedRunTarget}
+            selectedNodeUsages={editor.selectedNodeUsages}
+            screenIds={editor.screenIds}
+            graphReferenceCatalog={editor.graphReferenceCatalog}
+            screenBuilderSpec={editor.screenBuilderSpec}
+            graphBuilderSpec={editor.graphBuilderSpec}
+            updateScreenField={editor.updateScreenField}
+            addMenuItem={editor.addMenuItem}
+            removeMenuItem={editor.removeMenuItem}
+            updateMenuItem={editor.updateMenuItem}
+            addScreenHook={editor.addScreenHook}
+            removeScreenHook={editor.removeScreenHook}
+            updateScreenHook={editor.updateScreenHook}
+            toggleScreenTimer={editor.toggleScreenTimer}
+            updateScreenTimer={editor.updateScreenTimer}
+            addScreenAction={editor.addScreenAction}
+            removeScreenAction={editor.removeScreenAction}
+            updateScreenAction={editor.updateScreenAction}
+            updateCanvasTemplate={editor.updateCanvasTemplate}
+            updateCanvasHeader={editor.updateCanvasHeader}
+            addCanvasItem={editor.addCanvasItem}
+            removeCanvasItem={editor.removeCanvasItem}
+            updateCanvasItem={editor.updateCanvasItem}
+            updateMotionField={editor.updateMotionField}
+            addMotionTrack={editor.addMotionTrack}
+            removeMotionTrack={editor.removeMotionTrack}
+            updateMotionTrack={editor.updateMotionTrack}
+            detachMotionToRaw={editor.detachMotionToRaw}
+            enablePresetMotion={editor.enablePresetMotion}
+            updateDrawField={editor.updateDrawField}
+            addDrawStep={editor.addDrawStep}
+            removeDrawStep={editor.removeDrawStep}
+            updateDrawStep={editor.updateDrawStep}
+            getBindingsDraft={editor.getBindingsDraft}
+            updateBindingsDraft={editor.updateBindingsDraft}
+            commitBindingsDraft={editor.commitBindingsDraft}
+            applyBindingsPreset={editor.applyBindingsPreset}
+            ensureCurrentScreenBinding={editor.ensureCurrentScreenBinding}
+            addVariable={editor.addVariable}
+            removeVariable={editor.removeVariable}
+            updateVariable={editor.updateVariable}
+            addStorageKey={editor.addStorageKey}
+            removeStorageKey={editor.removeStorageKey}
+            updateStorageKey={editor.updateStorageKey}
+            declareFromUndeclared={editor.declareFromUndeclared}
+            addDataItem={editor.addDataItem}
+            removeDataItem={editor.removeDataItem}
+            updateDataItem={editor.updateDataItem}
+          />
         </div>
       </main>
 

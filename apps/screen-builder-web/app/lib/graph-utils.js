@@ -1,4 +1,4 @@
-import { MarkerType } from 'reactflow'
+import { MarkerType } from '@xyflow/react'
 import {
   RUN_TARGETS,
   isRunTargetId,
@@ -965,7 +965,16 @@ function buildEdgeLabel(entity, index) {
   return entity.label || entity.value || entity.id || `link-${index}`
 }
 
-function createGraphEdge({ source, sourceHandle, target, label, accent, kind, laneIndex = 0, laneCount = 1, focused = false, muted = false }) {
+function createGraphEdge({
+  source,
+  sourceHandle,
+  target,
+  label,
+  accent,
+  kind,
+  focused = false,
+  muted = false
+}) {
   return {
     id: `${source}:${sourceHandle}:${target}`,
     source,
@@ -974,13 +983,13 @@ function createGraphEdge({ source, sourceHandle, target, label, accent, kind, la
     label: focused ? label : '',
     type: 'canvas',
     markerEnd: { type: MarkerType.ArrowClosed },
-    animated: focused,
+    zIndex: focused ? 10 : 1,
     style: {
       stroke: accent,
-      strokeWidth: focused ? 1.8 : 1.15,
-      opacity: muted ? 0.14 : focused ? 1 : 0.42
+      strokeWidth: focused ? 2 : 1.5,
+      opacity: muted ? 0.18 : focused ? 1 : 0.7
     },
-    data: { source, sourceHandle, target, kind, laneIndex, laneCount, focused, muted }
+    data: { source, sourceHandle, target, kind, focused, muted }
   }
 }
 
@@ -1078,22 +1087,11 @@ export function buildGraphEdges(graph, options = {}) {
     }
 
   }
-
-  const countsByTarget = edgeSpecs.reduce((acc, spec) => {
-    acc[spec.target] = (acc[spec.target] || 0) + 1
-    return acc
-  }, {})
-  const seenByTarget = {}
-
   return edgeSpecs.map((spec) => {
-    const laneIndex = seenByTarget[spec.target] || 0
-    seenByTarget[spec.target] = laneIndex + 1
     const focused = !!focusedNodeId && (spec.source === focusedNodeId || spec.target === focusedNodeId)
     const muted = !!focusedNodeId && !focused
     return createGraphEdge({
       ...spec,
-      laneIndex,
-      laneCount: countsByTarget[spec.target] || 1,
       focused,
       muted
     })

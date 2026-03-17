@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { applyNodeChanges, useNodesState, useEdgesState } from 'reactflow'
+import { applyNodeChanges, useNodesState, useEdgesState } from '@xyflow/react'
 import { ACTION_TYPES } from '../pebble-protocol'
 import {
   schemaRegistry,
@@ -81,8 +81,8 @@ export default function useGraphEditor() {
   const [importText, setImportText] = useState(() => JSON.stringify(createDefaultGraph(), null, 2))
   const [notice, setNotice] = useState({ type: 'idle', text: 'Ready' })
   const [bindingsDraftByScreen, setBindingsDraftByScreen] = useState({})
-  const [nodePositions, setNodePositions] = useState({})
-  const [runTargetPositions, setRunTargetPositions] = useState({})
+  const nodePositionsRef = useRef({})
+  const runTargetPositionsRef = useRef({})
   const [visibleRunTargetIds, setVisibleRunTargetIds] = useState([])
   const [layoutTick, setLayoutTick] = useState(0)
   const [flowInstance, setFlowInstance] = useState(null)
@@ -311,17 +311,17 @@ export default function useGraphEditor() {
     const nextNodes = buildGraphNodes(
       graph,
       normalizedGraph,
-      nodePositions,
+      nodePositionsRef.current,
       selectedNodeId,
       activeRunTargetIds,
-      runTargetPositions,
+      runTargetPositionsRef.current,
       {
         onAddMenuItem: handleAddMenuItemFromGraph,
         onAddDrawerItem: handleAddDrawerItemFromGraph
       }
     )
     setNodes(nextNodes)
-  }, [activeRunTargetIds, graph, handleAddDrawerItemFromGraph, handleAddMenuItemFromGraph, layoutTick, nodePositions, normalizedGraph, runTargetPositions, selectedNodeId, setNodes])
+  }, [activeRunTargetIds, graph, handleAddDrawerItemFromGraph, handleAddMenuItemFromGraph, layoutTick, normalizedGraph, selectedNodeId, setNodes])
 
   useEffect(() => {
     setEdges(buildGraphEdges(graph, { focusedNodeId: selectedNodeId }))
@@ -336,9 +336,9 @@ export default function useGraphEditor() {
         changes.forEach((change) => {
           if (change.type === 'position' && change.position) {
             if (isRunTargetId(change.id)) {
-              setRunTargetPositions((prev) => ({ ...prev, [change.id]: change.position }))
+              runTargetPositionsRef.current = { ...runTargetPositionsRef.current, [change.id]: change.position }
             } else {
-              setNodePositions((prev) => ({ ...prev, [change.id]: change.position }))
+              nodePositionsRef.current = { ...nodePositionsRef.current, [change.id]: change.position }
             }
           }
         })
@@ -475,13 +475,10 @@ export default function useGraphEditor() {
     screenIds.forEach((id, index) => {
       auto[id] = computeAutoPosition(index, screenIds.length)
     })
-    setNodePositions(auto)
-    setRunTargetPositions({})
+    nodePositionsRef.current = auto
+    runTargetPositionsRef.current = {}
     setLayoutTick((tick) => tick + 1)
-    setNodes(buildGraphNodes(graph, normalizedGraph, auto, selectedNodeId, activeRunTargetIds, {}, {
-      onAddMenuItem: handleAddMenuItemFromGraph,
-      onAddDrawerItem: handleAddDrawerItemFromGraph
-    }))
+    setNotice({ type: 'success', text: 'Reset canvas layout' })
     setTimeout(() => flowInstance?.fitView({ padding: 0.22, duration: 400 }), 10)
   }
 
@@ -497,7 +494,7 @@ export default function useGraphEditor() {
     }
 
     if (options.position) {
-      setRunTargetPositions((prev) => ({ ...prev, [targetId]: options.position }))
+      runTargetPositionsRef.current = { ...runTargetPositionsRef.current, [targetId]: options.position }
     }
     setVisibleRunTargetIds((prev) => (prev.includes(targetId) ? prev : prev.concat(targetId)))
     setSelectedNodeId(targetId)
@@ -1286,14 +1283,12 @@ export default function useGraphEditor() {
       }
     })
 
-    setNodePositions((prev) => {
-      const next = { ...prev }
-      if (prev[selectedScreenId]) {
-        next[nextId] = prev[selectedScreenId]
-        delete next[selectedScreenId]
-      }
-      return next
-    })
+    const posNext = { ...nodePositionsRef.current }
+    if (posNext[selectedScreenId]) {
+      posNext[nextId] = posNext[selectedScreenId]
+      delete posNext[selectedScreenId]
+    }
+    nodePositionsRef.current = posNext
     setLayoutTick((tick) => tick + 1)
 
     setSelectedScreenId(nextId)
@@ -1528,7 +1523,7 @@ export default function useGraphEditor() {
     }))
 
     if (options.position) {
-      setNodePositions((prev) => ({ ...prev, [nextId]: options.position }))
+      nodePositionsRef.current = { ...nodePositionsRef.current, [nextId]: options.position }
     }
 
     setSelectedScreenId(nextId)
@@ -1565,11 +1560,9 @@ export default function useGraphEditor() {
       }
     })
 
-    setNodePositions((prev) => {
-      const next = { ...prev }
-      delete next[selectedScreenId]
-      return next
-    })
+    const posNext = { ...nodePositionsRef.current }
+    delete posNext[selectedScreenId]
+    nodePositionsRef.current = posNext
     setLayoutTick((tick) => tick + 1)
 
     setSelectedScreenId(fallbackId)
@@ -2286,14 +2279,10 @@ export default function useGraphEditor() {
     setPreviewScreenId(normalized.entryScreenId)
     setPreviewHistory([])
     setBindingsDraftByScreen({})
-    setNodePositions({})
-    setRunTargetPositions({})
+    nodePositionsRef.current = {}
+    runTargetPositionsRef.current = {}
     setVisibleRunTargetIds([])
     setLayoutTick((tick) => tick + 1)
-    setNodes(buildGraphNodes(normalized, normalized, {}, normalized.entryScreenId, collectRequiredRunTargetIds(normalized), {}, {
-      onAddMenuItem: handleAddMenuItemFromGraph,
-      onAddDrawerItem: handleAddDrawerItemFromGraph
-    }))
     setNotice({ type: 'success', text: 'Imported and normalized successfully' })
     setTimeout(() => flowInstance?.fitView({ padding: 0.2 }), 10)
   }
@@ -2324,8 +2313,8 @@ export default function useGraphEditor() {
     setPreviewVars({})
     setPreviewStorage({})
     setBindingsDraftByScreen({})
-    setNodePositions({})
-    setRunTargetPositions({})
+    nodePositionsRef.current = {}
+    runTargetPositionsRef.current = {}
     setVisibleRunTargetIds([])
     setLayoutTick((tick) => tick + 1)
     setNotice({ type: 'success', text: `Loaded template: ${template.label}` })
@@ -2421,8 +2410,8 @@ export default function useGraphEditor() {
     setBindingsDraftByScreen((prev) =>
       Object.fromEntries(Object.entries(prev).filter(([screenId]) => migrated.screens[screenId]))
     )
-    setRunTargetPositions((prev) =>
-      Object.fromEntries(Object.entries(prev).filter(([targetId]) => nextVisibleRunTargetIds.includes(targetId)))
+    runTargetPositionsRef.current = Object.fromEntries(
+      Object.entries(runTargetPositionsRef.current).filter(([targetId]) => nextVisibleRunTargetIds.includes(targetId))
     )
     setVisibleRunTargetIds(nextVisibleRunTargetIds)
     setLayoutTick((tick) => tick + 1)

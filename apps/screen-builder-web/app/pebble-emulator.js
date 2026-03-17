@@ -391,9 +391,6 @@ export default function PebbleEmulator({
           {(state === EMULATOR_STATES.IDLE || state === EMULATOR_STATES.ERROR) && (
             <button type="button" onClick={boot}>Boot</button>
           )}
-          {state === EMULATOR_STATES.READY && (
-            <button type="button" onClick={sendCurrentScreen}>Send Screen</button>
-          )}
         </div>
       </div>
 

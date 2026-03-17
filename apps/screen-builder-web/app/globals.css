@@ -2,7 +2,7 @@
 @import "tailwindcss";
 
 :root {
-  --radius: 0.625rem;
+  --radius: 0;
 
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -143,7 +143,7 @@ code {
 }
 
 .screen-node-shell-card {
-  padding-right: 52px;
+  padding-right: 28px;
 }
 
 .screen-node-shell-selected .screen-node {
@@ -311,8 +311,8 @@ code {
 
 .screen-node-slot-pill-handle {
   position: absolute;
-  right: 34px;
-  width: 30px;
+  right: 0;
+  width: 22px;
   height: 18px;
   transform: translateY(-50%);
   display: inline-flex;
@@ -327,7 +327,6 @@ code {
   user-select: none;
   -webkit-user-select: none;
   pointer-events: none;
-  z-index: 2;
 }
 
 .screen-node-slot-pill-handle-unwired {
