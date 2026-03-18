@@ -16,9 +16,10 @@ Phone PKJS handles state, can call OpenAI directly, and sends compact UI schema 
 
 ## Architecture
 
-- Watch renderer: [src/c/pebble-stewie.c](/Users/sam/dev/pebble/pebble-stewie/src/c/pebble-stewie.c)
+- Watch entrypoint: [src/c/main.c](/Users/sam/dev/pebble/pebble-stewie/src/c/main.c)
+- Watch runtime modules: [src/c/stewie](/Users/sam/dev/pebble/pebble-stewie/src/c/stewie)
 - Phone brain: [src/pkjs/index.js](/Users/sam/dev/pebble/pebble-stewie/src/pkjs/index.js)
-- Optional local backend prototype: [backend/openai-sdui-server.mjs](/Users/sam/dev/pebble/pebble-stewie/backend/openai-sdui-server.mjs)
+- Experimental legacy backend: [backend/legacy/openai-sdui-server.mjs](/Users/sam/dev/pebble/pebble-stewie/backend/legacy/openai-sdui-server.mjs)
 - Message keys: [package.json](/Users/sam/dev/pebble/pebble-stewie/package.json)
 - Screen authoring guide: [SCREEN_SCHEMA_GUIDE.md](/Users/sam/dev/pebble/pebble-stewie/docs/SCREEN_SCHEMA_GUIDE.md)
 - SDUI import/export spec: [docs/SDUI_SCHEMA_SPEC.md](/Users/sam/dev/pebble/pebble-stewie/docs/SDUI_SCHEMA_SPEC.md)
@@ -39,6 +40,8 @@ Builder quick run:
 pnpm install
 pnpm --filter screen-builder-web dev
 ```
+
+Legacy graph imports are supported, but the builder always normalizes and exports the latest canonical schema.
 
 ## Message Protocol
 
@@ -65,7 +68,7 @@ PKJS sends a `POST https://api.openai.com/v1/responses` request with your config
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "model": "gpt-4.1-mini",
   "input": "...system prompt plus watch context and user input..."
 }
@@ -73,13 +76,13 @@ PKJS sends a `POST https://api.openai.com/v1/responses` request with your config
 
 The runtime then extracts the first JSON object from the model response and normalizes it into the canonical Pebble graph schema.
 
-## Optional Local Backend
+## Experimental Legacy Backend
 
-An experimental local backend still exists in `backend/openai-sdui-server.mjs`, but the current PKJS runtime does not use `openai-backend-url` / `openai-backend-token`.
+`backend/legacy/openai-sdui-server.mjs` is kept only as an unsupported legacy reference. It still targets the older turn-schema/backend transport and is not part of the supported production runtime path.
 
-If you want to bring the backend transport back, add an explicit transport switch rather than relying on stale settings keys.
+If you want to revive a backend-mediated transport later, do it behind an explicit transport switch rather than relying on stale settings keys.
 
-Example backend response shape:
+Legacy backend response shape:
 
 ```json
 {
@@ -102,27 +105,27 @@ Example backend response shape:
 }
 ```
 
-## Optional Backend Run
+## Legacy Backend Run (unsupported)
 
 ```bash
 # default key file used automatically: ~/.config/openai/key
 export OPENAI_MODEL="gpt-4.1-mini"   # optional
 export PORT=8787                       # optional
-node backend/openai-sdui-server.mjs
+node backend/legacy/openai-sdui-server.mjs
 ```
 
 Optional explicit key file path:
 
 ```bash
 export OPENAI_API_KEY_FILE="$HOME/.config/openai/key"
-node backend/openai-sdui-server.mjs
+node backend/legacy/openai-sdui-server.mjs
 ```
 
 Optional direct key via env var (overrides key file):
 
 ```bash
 export OPENAI_API_KEY="YOUR_KEY"
-node backend/openai-sdui-server.mjs
+node backend/legacy/openai-sdui-server.mjs
 ```
 
 Optional backend auth token:
@@ -155,6 +158,7 @@ pebble install --phone <PHONE_IP> --logs
 ## Notes
 
 - Agent mode uses the canonical graph schema + your OpenAI key/model from app settings.
+- Canonical graph authoring/export now targets `pebble.sdui.v1.2.0`; older imports are migrated on load.
 - Voice input still works through watch dictation (`actionType = 4`).
 
 ## Future Schema Strategy

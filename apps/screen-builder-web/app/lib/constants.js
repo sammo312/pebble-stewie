@@ -1,7 +1,7 @@
 import * as sduiContractModule from '@pebble/sdui-contract'
 
 const contract = sduiContractModule.default || sduiContractModule
-export const { constants, schemaRegistry, builderElements, graphSchema, motionCompiler } = contract
+export const { constants, schemaRegistry, builderElements, graphSchema, motionCompiler, runtimeValues } = contract
 
 export const bindingPresets = [
   {
@@ -54,8 +54,6 @@ export const bindingPresets = [
     )
   }
 ]
-
-export const SCHEMA_VERSIONS = schemaRegistry.listSchemaVersions()
 
 export function getBindingPresetsForSchema(schemaVersion) {
   const descriptor = schemaRegistry.getSchemaDescriptor(schemaVersion) || schemaRegistry.getSchemaDescriptor()

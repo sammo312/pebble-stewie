@@ -1,6 +1,6 @@
 # Pebble UI Support Plan
 
-Implementation plan for expanding `pebble.sdui.v1` beyond current `menu`/`card` support.
+Implementation plan for expanding `pebble.sdui.v1.2.0` beyond current `menu`/`card` support.
 
 Reference doc: [PEBBLE_UI_ELEMENTS.md](/Users/sam/dev/pebble/pebble-stewie/docs/PEBBLE_UI_ELEMENTS.md)
 

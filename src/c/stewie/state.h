@@ -3,6 +3,9 @@
 #include <pebble.h>
 #include <string.h>
 
+// Native buffers intentionally exceed JS contract limits to leave room for
+// null terminators and defensive overflow margin. Exact protocol IDs/enums
+// must match; text buffers only need to stay larger than the JS caps.
 #define MAX_TITLE_LEN 32
 #define MAX_BODY_LEN 192
 #define MAX_SCROLL_BODY_LEN 1040

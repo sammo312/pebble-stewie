@@ -104,7 +104,6 @@ export default function Page() {
       <Toolbar
         graph={editor.graph}
         graphBuilderSpec={editor.graphBuilderSpec}
-        schemaVersions={editor.schemaVersions}
         screenIds={editor.screenIds}
         screenOptions={editor.graphReferenceCatalog.screenOptions}
         edges={editor.edges}
@@ -113,7 +112,6 @@ export default function Page() {
         canExport={editor.canExport}
         deleteSelectedScreen={editor.deleteSelectedScreen}
         resetLayout={editor.resetLayout}
-        setSchemaVersion={editor.setSchemaVersion}
         setEntryScreenId={editor.setEntryScreenId}
         setStorageNamespace={editor.setStorageNamespace}
         setShowImportExport={editor.setShowImportExport}

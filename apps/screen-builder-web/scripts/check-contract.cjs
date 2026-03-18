@@ -1,5 +1,6 @@
 'use strict';
 
+var assert = require('node:assert/strict');
 var contract = require('../../../packages/sdui-contract/src');
 var latestVersion = contract.constants.LATEST_SDUI_SCHEMA_VERSION;
 var legacyVersion = contract.constants.SDUI_SCHEMA_VERSION;
@@ -88,11 +89,24 @@ var normalizedLatest = contract.graphSchema.normalizeCanonicalGraph(latestSample
 var normalizedLegacy = contract.graphSchema.normalizeCanonicalGraph(legacySample);
 var latestSpec = contract.builderElements.deriveBuilderSpecFromGraph(latestSample);
 var legacySpec = contract.builderElements.deriveBuilderSpecFromGraph(legacySample);
+var migratedLegacySpec = contract.builderElements.deriveBuilderSpecFromGraph(normalizedLegacy);
 
-console.log('normalized latest:', JSON.stringify(normalizedLatest, null, 2));
-console.log('normalized legacy:', JSON.stringify(normalizedLegacy, null, 2));
-console.log('registered schema versions:', contract.schemaRegistry.listSchemaVersions().join(', '));
-console.log('latest descriptor screen types:', latestDescriptor.enums.screenTypes.join(', '));
-console.log('legacy descriptor screen types:', legacyDescriptor.enums.screenTypes.join(', '));
-console.log('latest builder screen fields:', latestSpec.screenFields.map(function(field) { return field.id; }).join(', '));
-console.log('legacy builder screen fields:', legacySpec.screenFields.map(function(field) { return field.id; }).join(', '));
+assert.ok(normalizedLatest, 'latest graph should normalize');
+assert.ok(normalizedLegacy, 'legacy graph should normalize');
+assert.equal(normalizedLatest.schemaVersion, latestVersion);
+assert.equal(normalizedLegacy.schemaVersion, latestVersion);
+assert.equal(normalizedLegacy.entryScreenId, 'root');
+assert.equal(normalizedLegacy.screens.done.type, 'card');
+assert.deepEqual(contract.schemaRegistry.listSchemaVersions(), [
+  legacyVersion,
+  contract.constants.SDUI_SCHEMA_VERSION_V1_1_0,
+  latestVersion
+]);
+assert.ok(latestDescriptor.enums.screenTypes.includes('draw'));
+assert.ok(!legacyDescriptor.enums.screenTypes.includes('draw'));
+assert.ok(latestSpec.screenFields.some(function(field) { return field.id === 'onEnter'; }));
+assert.ok(legacySpec.screenFields.some(function(field) { return field.id === 'items'; }));
+assert.equal(legacySpec.schemaVersion, legacyVersion);
+assert.equal(migratedLegacySpec.schemaVersion, latestVersion);
+
+console.log('Contract check passed');

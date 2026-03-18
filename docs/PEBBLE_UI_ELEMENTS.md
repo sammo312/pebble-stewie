@@ -1,6 +1,6 @@
 # Pebble UI Elements in SDUI
 
-How every native Pebble UI element maps (or will map) to `pebble.sdui.v1`.
+How every native Pebble UI element maps (or will map) to `pebble.sdui.v1.2.0`.
 
 Reference: [Pebble C SDK User Interface](https://developer.rebble.io/docs/c/User_Interface/)
 

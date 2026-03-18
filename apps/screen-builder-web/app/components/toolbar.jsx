@@ -32,7 +32,6 @@ import {
 export default function Toolbar({
   graph,
   graphBuilderSpec,
-  schemaVersions,
   screenIds,
   screenOptions = [],
   edges,
@@ -41,7 +40,6 @@ export default function Toolbar({
   canExport,
   deleteSelectedScreen,
   resetLayout,
-  setSchemaVersion,
   setEntryScreenId,
   setStorageNamespace,
   setShowImportExport,
@@ -49,33 +47,9 @@ export default function Toolbar({
 }) {
   const [graphMenuOpen, setGraphMenuOpen] = useState(false)
   const supportsStorage = graphBuilderSpec?.enums?.runTypes?.includes('store')
-  const schemaVersionIndex = new Map(schemaVersions.map((version, index) => [version, index]))
   const entryOptions = screenOptions.length > 0
     ? screenOptions
     : screenIds.map((screenId) => ({ value: screenId, label: screenId }))
-
-  function handleSchemaVersionChange(nextVersion) {
-    if (!nextVersion || nextVersion === graph.schemaVersion) {
-      return
-    }
-
-    const currentIndex = schemaVersionIndex.get(graph.schemaVersion)
-    const nextIndex = schemaVersionIndex.get(nextVersion)
-    const isDowngrade = typeof currentIndex === 'number' && typeof nextIndex === 'number' && nextIndex < currentIndex
-
-    if (isDowngrade) {
-      const shouldProceed =
-        typeof window === 'undefined' ||
-        window.confirm(`Switch to ${nextVersion}?\nDowngrading will remove workflow details not supported by this schema (hooks, timers, variables, storage links).`)
-
-      if (shouldProceed) {
-        setSchemaVersion(nextVersion)
-      }
-      return
-    }
-
-    setSchemaVersion(nextVersion)
-  }
 
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line/70 bg-background/95 px-3">
@@ -129,20 +103,12 @@ export default function Toolbar({
                 <label className="text-[10px] font-medium uppercase tracking-[0.12em] text-ink-dim">
                   Schema Version
                 </label>
-                <Select value={graph.schemaVersion} onValueChange={handleSchemaVersionChange}>
-                  <SelectTrigger className="h-7 w-full border-line/80 bg-panel-soft text-xs text-ink">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent
-                    position="popper"
-                    align="start"
-                    className="w-[var(--radix-select-trigger-width)] border-line bg-panel"
-                  >
-                    {schemaVersions.map((version) => (
-                      <SelectItem value={version} key={version}>{version}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex h-7 items-center justify-between border border-line/80 bg-panel-soft px-2 text-xs text-ink">
+                  <span>{graph.schemaVersion}</span>
+                  <Badge variant="outline" className="h-4 rounded-none border-line/80 bg-card/70 px-1 text-[9px] text-ink-dim">
+                    latest only
+                  </Badge>
+                </div>
               </div>
 
               <div className="space-y-1.5">

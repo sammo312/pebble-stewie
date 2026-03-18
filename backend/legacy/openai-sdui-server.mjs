@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Unsupported legacy backend. This path still targets the older turn-schema
+// contract and is intentionally quarantined from the supported runtime surface.
+
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -494,7 +497,9 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`OpenAI SDUI backend listening on http://0.0.0.0:${PORT}/turn`);
+  console.warn('Warning: running unsupported legacy backend transport.');
+  console.warn('This path is kept only as a reference and is not part of the supported runtime.');
+  console.log(`Legacy OpenAI SDUI backend listening on http://0.0.0.0:${PORT}/turn`);
   if (OPENAI_DEBUG_LOG) {
     console.log(`OpenAI debug logging enabled (OPENAI_LOG_MAX_CHARS=${OPENAI_LOG_MAX_CHARS})`);
   }

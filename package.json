@@ -9,8 +9,12 @@
     "packages/*"
   ],
   "scripts": {
-    "backend": "node backend/openai-sdui-server.mjs",
-    "check:contract": "node apps/screen-builder-web/scripts/check-contract.js"
+    "check": "pnpm run check:contract && pnpm run check:protocol && pnpm test",
+    "check:builder": "pnpm --filter screen-builder-web build",
+    "check:ci": "pnpm run check && pnpm run check:builder",
+    "check:contract": "node apps/screen-builder-web/scripts/check-contract.cjs",
+    "check:protocol": "node scripts/verify-protocol.js",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {},
   "pebble": {

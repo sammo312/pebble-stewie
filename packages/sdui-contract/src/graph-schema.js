@@ -394,13 +394,15 @@ function normalizeGraphScreen(rawScreen, fallbackId, schemaVersionOrDescriptor) 
   return screen;
 }
 
-function normalizeCanonicalGraph(rawGraph) {
+function normalizeCanonicalGraph(rawGraph, targetSchemaVersion) {
   if (!rawGraph || typeof rawGraph !== 'object') {
     return null;
   }
 
-  var descriptor = schemaRegistry.getSchemaDescriptor(String(rawGraph.schemaVersion || ''));
-  if (!descriptor) {
+  var sourceDescriptor = schemaRegistry.getSchemaDescriptor(String(rawGraph.schemaVersion || ''));
+  var targetDescriptor = schemaRegistry.getSchemaDescriptor(String(targetSchemaVersion || '')) ||
+    schemaRegistry.getSchemaDescriptor();
+  if (!sourceDescriptor || !targetDescriptor) {
     return null;
   }
 
@@ -416,7 +418,7 @@ function normalizeCanonicalGraph(rawGraph) {
 
   for (var i = 0; i < screenKeys.length; i++) {
     var rawScreenKey = screenKeys[i];
-    var normalizedScreen = normalizeGraphScreen(rawGraph.screens[rawScreenKey], rawScreenKey, descriptor);
+    var normalizedScreen = normalizeGraphScreen(rawGraph.screens[rawScreenKey], rawScreenKey, sourceDescriptor);
     if (!normalizedScreen) {
       return null;
     }
@@ -426,7 +428,7 @@ function normalizeCanonicalGraph(rawGraph) {
     normalizedScreens[normalizedScreen.id] = normalizedScreen;
   }
 
-  var entryScreenId = sanitizeGraphId(rawGraph.entryScreenId, '', descriptor.limits.maxScreenIdLen);
+  var entryScreenId = sanitizeGraphId(rawGraph.entryScreenId, '', targetDescriptor.limits.maxScreenIdLen);
   if (!entryScreenId) {
     return null;
   }
@@ -435,13 +437,31 @@ function normalizeCanonicalGraph(rawGraph) {
     return null;
   }
 
+  if (targetDescriptor.schemaVersion !== sourceDescriptor.schemaVersion) {
+    var migratedScreens = {};
+    var normalizedScreenKeys = Object.keys(normalizedScreens);
+    for (var j = 0; j < normalizedScreenKeys.length; j++) {
+      var normalizedScreenKey = normalizedScreenKeys[j];
+      var migratedScreen = normalizeGraphScreen(
+        normalizedScreens[normalizedScreenKey],
+        normalizedScreenKey,
+        targetDescriptor
+      );
+      if (!migratedScreen || migratedScreens[migratedScreen.id]) {
+        return null;
+      }
+      migratedScreens[migratedScreen.id] = migratedScreen;
+    }
+    normalizedScreens = migratedScreens;
+  }
+
   var normalized = {
-    schemaVersion: descriptor.schemaVersion,
+    schemaVersion: targetDescriptor.schemaVersion,
     entryScreenId: entryScreenId,
     screens: normalizedScreens
   };
 
-  var storageNamespace = supportsStorageNamespace(descriptor) ?
+  var storageNamespace = supportsStorageNamespace(targetDescriptor) ?
     normalizeStorageNamespace(rawGraph.storageNamespace) : '';
   if (storageNamespace) {
     normalized.storageNamespace = storageNamespace;

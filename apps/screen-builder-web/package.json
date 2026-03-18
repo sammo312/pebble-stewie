@@ -2,6 +2,7 @@
   "name": "screen-builder-web",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "dependencies": {
     "@pebble/sdui-contract": "file:../../packages/sdui-contract",
     "@tailwindcss/postcss": "^4.2.1",
@@ -21,6 +22,6 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
-    "check-contract": "node scripts/check-contract.js"
+    "check-contract": "node scripts/check-contract.cjs"
   }
 }

@@ -30,12 +30,12 @@ export default function ImportExportDialog({
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="field-label">Import</label>
+            <label className="field-label">Import (legacy allowed)</label>
             <textarea
               className="field-input area tall"
               value={importText}
               onChange={(event) => setImportText(event.target.value)}
-              placeholder="Paste screen graph JSON here"
+              placeholder="Paste canonical graph JSON here. Legacy graphs are auto-migrated to the latest schema."
             />
             <div className="flex gap-2 mt-2">
               <Button size="sm" onClick={() => { handleImport(); onOpenChange(false) }}>
@@ -48,7 +48,7 @@ export default function ImportExportDialog({
           </div>
 
           <div>
-            <label className="field-label">Export</label>
+            <label className="field-label">Export (latest only)</label>
             <textarea
               className="field-input area tall"
               readOnly

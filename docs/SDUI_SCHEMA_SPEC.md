@@ -1,6 +1,6 @@
-# Pebble Stewie Canonical Schema (`pebble.sdui.v1`)
+# Pebble Stewie Canonical Schema (`pebble.sdui.v1.2.0`)
 
-This is the canonical schema for Pebble Stewie.
+This is the canonical schema for Pebble Stewie. Older `v1` and `v1.1.0` graphs are accepted on import, then normalized to this version.
 
 Everything should use this shape:
 
@@ -14,7 +14,7 @@ There is no separate turn schema anymore.
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "root",
   "screens": {
     "root": {
@@ -52,7 +52,7 @@ There is no separate turn schema anymore.
 
 - `schemaVersion`
   - required
-  - must be `pebble.sdui.v1`
+  - must be `pebble.sdui.v1.2.0`
 - `entryScreenId`
   - required
   - must point to a screen in `screens`
@@ -299,7 +299,7 @@ Recommended safe authoring limits:
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "done",
   "screens": {
     "done": {
@@ -316,7 +316,7 @@ Recommended safe authoring limits:
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "root",
   "screens": {
     "root": {
@@ -356,7 +356,7 @@ Recommended safe authoring limits:
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "time-card",
   "screens": {
     "time-card": {

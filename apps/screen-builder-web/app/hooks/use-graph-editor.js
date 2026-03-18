@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { applyNodeChanges, useNodesState, useEdgesState } from '@xyflow/react'
 import { ACTION_TYPES } from '../pebble-protocol'
 import {
-  schemaRegistry,
   builderElements,
   graphSchema,
   bindingPresets,
+  runtimeValues,
   isRunTargetId,
   getRunTargetDefinition,
   screenUsesButtonSlots,
@@ -44,10 +44,63 @@ import {
   PREVIEW_PLACEHOLDER_ID,
   createPreviewRenderScreen,
   createPreviewPlaceholderScreen,
-  renderPreviewValueTemplate,
   getMenuItemFromPreviewAction,
   getMenuActionFromPreviewAction
 } from '../lib/preview-utils'
+import {
+  applyPreviewStorageMutationToState as applyPreviewStorageMutationState,
+  applyPreviewVarMutationToState as applyPreviewVarMutationState,
+  computePreviewJump as computePreviewJumpInRuntime,
+  evaluatePreviewCondition as evaluatePreviewConditionInRuntime,
+  executePreviewHookSequence as executePreviewHookSequenceInRuntime
+} from '../lib/preview-runtime.mjs'
+import {
+  createGraphLoadState,
+  parseImportedGraphText,
+  prepareTemplateGraph
+} from '../lib/graph-loading.mjs'
+import {
+  addDataItemToGraph,
+  addMenuItemToScreen,
+  addMotionTrackToScreen,
+  addScreenActionToScreen,
+  addScreenHookToScreen,
+  addStorageKeyToGraph,
+  addVariableToGraph,
+  addCanvasItemToScreen,
+  addDrawStepToScreen,
+  clearLinkByHandleInGraph,
+  connectCanvasHandleInGraph,
+  describeCanvasTarget as describeCanvasTargetInGraph,
+  detachMotionToRawInScreen,
+  enablePresetMotionInScreen,
+  removeCanvasItemFromScreen,
+  removeDataItemFromGraph,
+  removeDrawStepFromScreen,
+  removeMenuItemFromScreen,
+  removeMotionTrackFromScreen,
+  removeScreenActionFromScreen,
+  removeScreenHookFromScreen,
+  removeStorageKeyFromGraph,
+  removeVariableFromGraph,
+  setEntryScreenIdInGraph,
+  setStorageNamespaceInGraph,
+  toggleScreenTimerInScreen,
+  updateCanvasHeaderInScreen,
+  updateCanvasItemInScreen,
+  updateCanvasTemplateInScreen,
+  updateDataItemInGraph,
+  updateDrawFieldInScreen,
+  updateDrawStepInScreen,
+  updateMenuItemInScreen,
+  updateMotionFieldInScreen,
+  updateMotionTrackInScreen,
+  updateScreenActionInScreen,
+  updateScreenHookInScreen,
+  updateScreenTimerInScreen,
+  updateStorageKeyInGraph,
+  updateVariableInGraph
+} from '../lib/graph-mutations.mjs'
 import {
   clampDrawStepCount,
   coerceDrawNumber,
@@ -64,6 +117,12 @@ import {
   normalizeMotion
 } from '../lib/draw-utils'
 import { GRAPH_TEMPLATES } from '../lib/graph-templates'
+
+const PREVIEW_RUNTIME_DEPS = {
+  runtimeValues,
+  maxRedirectDepth: 8,
+  now: Date.now
+}
 
 export default function useGraphEditor() {
   const [graph, setGraph] = useState(createDefaultGraph)
@@ -89,7 +148,6 @@ export default function useGraphEditor() {
   const [nodes, setNodes] = useNodesState([])
   const [edges, setEdges] = useEdgesState([])
   const [showImportExport, setShowImportExport] = useState(false)
-  const schemaVersions = useMemo(() => schemaRegistry.listSchemaVersions(), [])
 
   const normalizedGraph = useMemo(() => {
     const withDefaults = compileVariableDefaults(graph)
@@ -151,6 +209,63 @@ export default function useGraphEditor() {
       motion,
       drawing: compileMotionToDrawing(motion, canvas)
     }
+  }
+
+  function getDrawMutationDeps() {
+    return {
+      buildCompiledMotionState,
+      clampDrawStepCount,
+      coerceDrawNumber,
+      createDefaultCanvas,
+      createDefaultCanvasMotion,
+      createDefaultDrawing,
+      createDefaultDrawStep,
+      createDefaultMotion,
+      createDefaultMotionTrack,
+      ensureUniqueEntityId,
+      getDrawStepFieldLimit,
+      isDrawStepNumericField,
+      maxCanvasItems: 4,
+      maxDrawSteps: graphBuilderSpec.limits.maxDrawSteps || 6,
+      maxOptionLabelLen: graphBuilderSpec.limits.maxOptionLabelLen || 18,
+      maxTitleLen: graphBuilderSpec.limits.maxTitleLen || 30,
+      normalizeCanvas,
+      normalizeMotion
+    }
+  }
+
+  function getPreviewRuntimeDeps() {
+    return PREVIEW_RUNTIME_DEPS
+  }
+
+  function applyLoadedGraphState(graph, options = {}) {
+    const nextState = createGraphLoadState(graph, options)
+
+    setGraph(nextState.graph)
+    if (Object.prototype.hasOwnProperty.call(nextState, 'importText')) {
+      setImportText(nextState.importText)
+    }
+    setSelectedScreenId(nextState.selectedScreenId)
+    setSelectedNodeId(nextState.selectedNodeId)
+    setPreviewPlaceholderScreen(nextState.previewPlaceholderScreen)
+    setPreviewScreenId(nextState.previewScreenId)
+    setPreviewHistory(nextState.previewHistory)
+    if (Object.prototype.hasOwnProperty.call(nextState, 'previewVars')) {
+      setPreviewVars(nextState.previewVars)
+    }
+    if (Object.prototype.hasOwnProperty.call(nextState, 'previewStorage')) {
+      setPreviewStorage(nextState.previewStorage)
+    }
+    setBindingsDraftByScreen(nextState.bindingsDraftByScreen)
+    if (nextState.resetNodePositions) {
+      nodePositionsRef.current = {}
+    }
+    if (nextState.resetRunTargetPositions) {
+      runTargetPositionsRef.current = {}
+    }
+    setVisibleRunTargetIds(nextState.visibleRunTargetIds)
+    setLayoutTick((tick) => tick + 1)
+    setTimeout(() => flowInstance?.fitView({ padding: 0.2 }), 10)
   }
 
   // --- Callbacks ---
@@ -269,7 +384,13 @@ export default function useGraphEditor() {
     const entryId = previewScreenId !== PREVIEW_PLACEHOLDER_ID ? previewScreenId : graph.entryScreenId
     const entryScreen = graph.screens[entryId]
     if (entryScreen && Array.isArray(entryScreen.onEnter) && entryScreen.onEnter.length > 0) {
-      const result = executePreviewHookSequence(entryScreen.onEnter, entryScreen, nextVars, nextStorage)
+      const result = executePreviewHookSequenceInRuntime(
+        entryScreen.onEnter,
+        entryScreen,
+        nextVars,
+        nextStorage,
+        getPreviewRuntimeDeps()
+      )
       nextVars = result.vars
       nextStorage = result.storage
     }
@@ -350,70 +471,6 @@ export default function useGraphEditor() {
 
   // --- Helper fns used by mutations ---
 
-  function buildRunForCanvasTarget(targetId, existingRun = {}) {
-    if (isRunTargetId(targetId)) {
-      return createRunFromTargetId(targetId, existingRun)
-    }
-
-    if (graph.screens[targetId]) {
-      return pruneRunForType('navigate', { ...(existingRun || {}), screen: targetId })
-    }
-
-    return null
-  }
-
-  function createRunFromTargetId(targetId, existingRun = {}) {
-    const target = getRunTargetDefinition(targetId)
-    if (!target) {
-      return null
-    }
-
-    if (target.runType === 'agent_prompt') {
-      return pruneRunForType('agent_prompt', {
-        ...existingRun,
-        type: 'agent_prompt',
-        prompt: existingRun.prompt || 'Ask the agent to help with this action.'
-      })
-    }
-
-    if (target.runType === 'agent_command') {
-      return pruneRunForType('agent_command', {
-        ...existingRun,
-        type: 'agent_command',
-        command: existingRun.command || 'reset'
-      })
-    }
-
-    if (target.runType === 'effect') {
-      return pruneRunForType('effect', {
-        ...existingRun,
-        type: 'effect',
-        vibe: existingRun.vibe || 'short',
-        light: !!existingRun.light
-      })
-    }
-
-    if (target.runType === 'set_var') {
-      return pruneRunForType('set_var', {
-        ...existingRun,
-        type: 'set_var',
-        key: existingRun.key || 'count',
-        value: existingRun.value || 'increment'
-      })
-    }
-
-    if (target.runType === 'store') {
-      return pruneRunForType('store', {
-        ...existingRun,
-        type: 'store',
-        key: existingRun.key || 'high_score',
-        value: existingRun.value || '{{var.count}}'
-      })
-    }
-
-    return null
-  }
-
   function createDefaultScreenHookRun() {
     return pruneRunForType('effect', {
       type: 'effect',
@@ -432,21 +489,7 @@ export default function useGraphEditor() {
   }
 
   function describeCanvasTarget(targetId) {
-    if (isRunTargetId(targetId)) {
-      return getRunTargetDefinition(targetId)?.title || targetId
-    }
-    const targetScreen = graph.screens[targetId]
-    return targetScreen?.title || targetId
-  }
-
-  function defaultCardActionLabelForLink(slot, targetId) {
-    const targetName = describeCanvasTarget(targetId)
-    return isRunTargetId(targetId) ? `${slot} ${targetName}` : `${slot} → ${targetName}`
-  }
-
-  function defaultMenuActionLabelForLink(targetId) {
-    const targetName = describeCanvasTarget(targetId)
-    return isRunTargetId(targetId) ? targetName : `Open ${targetName}`
+    return describeCanvasTargetInGraph(graph, targetId, { isRunTargetId, getRunTargetDefinition })
   }
 
   function updateSelectedScreen(mutator) {
@@ -517,112 +560,17 @@ export default function useGraphEditor() {
   }
 
   const clearLinkByHandle = useCallback(function clearLinkByHandle(sourceScreenId, sourceHandle) {
-    let removed = false
+    let result = { graph, removed: false }
 
     setGraph((prev) => {
-      const screen = prev.screens[sourceScreenId]
-      if (!screen) {
-        return prev
-      }
-
-      if (sourceHandle.startsWith('item-')) {
-        const key = sourceHandle.slice('item-'.length)
-        const items = Array.isArray(screen.items) ? screen.items : []
-        const nextItems = items.map((item, idx) => {
-          const matchId = item.id ? String(item.id) === key : false
-          const matchIndex = !item.id && String(idx) === key
-          if (!matchId && !matchIndex) {
-            return item
-          }
-          removed = !!item.run
-          return { ...item, run: null }
-        })
-        if (!removed) {
-          return prev
-        }
-        return {
-          ...prev,
-          screens: {
-            ...prev.screens,
-            [sourceScreenId]: {
-              ...screen,
-              items: nextItems
-            }
-          }
-        }
-      }
-
-      if (sourceHandle.startsWith('action-') || sourceHandle.startsWith('slot-')) {
-        const isSlot = sourceHandle.startsWith('slot-')
-        const key = isSlot ? sourceHandle.slice('slot-'.length) : sourceHandle.slice('action-'.length)
-        const actions = getScreenActions(screen)
-        const nextActions = actions.map((action, idx) => {
-          const match = isSlot
-            ? action.slot === key
-            : (action.id ? String(action.id) === key : String(idx) === key)
-          if (!match) {
-            return action
-          }
-          removed = !!action.run
-          return { ...action, run: null }
-        })
-        if (!removed) {
-          return prev
-        }
-        return {
-          ...prev,
-          screens: {
-            ...prev.screens,
-            [sourceScreenId]: {
-              ...screen,
-              actions: nextActions
-            }
-          }
-        }
-      }
-
-      if (sourceHandle.startsWith('hook-')) {
-        const parts = sourceHandle.slice('hook-'.length).split('-')
-        const hookKey = parts[0]
-        const hookIndex = parseInt(parts[1], 10)
-        const hooks = Array.isArray(screen[hookKey]) ? [...screen[hookKey]] : []
-        if (hooks[hookIndex]) {
-          removed = true
-          hooks.splice(hookIndex, 1)
-          return {
-            ...prev,
-            screens: {
-              ...prev.screens,
-              [sourceScreenId]: {
-                ...screen,
-                [hookKey]: hooks
-              }
-            }
-          }
-        }
-      }
-
-      if (sourceHandle === 'timer-run' && screen.timer) {
-        removed = true
-        return {
-          ...prev,
-          screens: {
-            ...prev.screens,
-            [sourceScreenId]: {
-              ...screen,
-              timer: { ...screen.timer, run: null }
-            }
-          }
-        }
-      }
-
-      return prev
+      result = clearLinkByHandleInGraph(prev, sourceScreenId, sourceHandle, { getScreenActions })
+      return result.graph
     })
 
-    if (removed) {
+    if (result.removed) {
       setNotice({ type: 'success', text: `Removed link from ${sourceHandle}` })
     }
-  }, [setGraph, setNotice])
+  }, [graph, setGraph, setNotice])
 
   const handleEdgesDelete = useCallback((deletedEdges) => {
     ;(deletedEdges || []).forEach((edge) => {
@@ -648,105 +596,12 @@ export default function useGraphEditor() {
     }
   }
 
-  function normalizePreviewVarKey(rawKey) {
-    return String(rawKey || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]/g, '_')
-      .replace(/^_+/, '')
-      .replace(/_+$/, '')
-  }
-
-  function parsePreviewConditionValue(rawValue) {
-    const text = String(rawValue ?? '').trim()
-    if (!text) {
-      return ''
-    }
-    if (text === 'true') {
-      return true
-    }
-    if (text === 'false') {
-      return false
-    }
-    if (/^-?\d+(\.\d+)?$/.test(text)) {
-      return Number(text)
-    }
-    return text
-  }
-
   function evaluatePreviewCondition(condition, vars) {
-    if (!condition || typeof condition !== 'object') {
-      return true
-    }
-
-    const key = normalizePreviewVarKey(condition.var)
-    const op = String(condition.op || '').toLowerCase()
-    if (!key || !op) {
-      return false
-    }
-
-    const left = vars[key]
-    const right = parsePreviewConditionValue(condition.value)
-    const leftNumber = Number(left)
-    const rightNumber = Number(right)
-    const numbersComparable = Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
-
-    if (op === 'eq') {
-      return String(left ?? '') === String(right ?? '')
-    }
-    if (op === 'neq') {
-      return String(left ?? '') !== String(right ?? '')
-    }
-    if (!numbersComparable) {
-      return false
-    }
-    if (op === 'gt') {
-      return leftNumber > rightNumber
-    }
-    if (op === 'gte') {
-      return leftNumber >= rightNumber
-    }
-    if (op === 'lt') {
-      return leftNumber < rightNumber
-    }
-    if (op === 'lte') {
-      return leftNumber <= rightNumber
-    }
-
-    return false
+    return evaluatePreviewConditionInRuntime(condition, vars, getPreviewRuntimeDeps())
   }
 
   function applyPreviewVarMutationToState(run, vars) {
-    const key = normalizePreviewVarKey(run?.key)
-    const valueSpec = String(run?.value || '').trim()
-    if (!key || !valueSpec) {
-      return null
-    }
-
-    const nextVars = { ...(vars || {}) }
-    const current = nextVars[key]
-    let nextValue = valueSpec
-
-    if (valueSpec === 'increment') {
-      const numeric = Number(current)
-      nextValue = Number.isFinite(numeric) ? numeric + 1 : 1
-    } else if (valueSpec === 'decrement') {
-      const numeric = Number(current)
-      nextValue = Number.isFinite(numeric) ? numeric - 1 : -1
-    } else if (valueSpec === 'toggle') {
-      nextValue = !(current === true || String(current).toLowerCase() === 'true')
-    } else if (valueSpec.indexOf('literal:') === 0) {
-      nextValue = valueSpec.slice('literal:'.length)
-    } else if (valueSpec === 'true') {
-      nextValue = true
-    } else if (valueSpec === 'false') {
-      nextValue = false
-    } else if (/^-?\d+(\.\d+)?$/.test(valueSpec)) {
-      nextValue = Number(valueSpec)
-    }
-
-    nextVars[key] = nextValue
-    return nextVars
+    return applyPreviewVarMutationState(run, vars, getPreviewRuntimeDeps())
   }
 
   function applyPreviewVarMutation(run) {
@@ -759,17 +614,7 @@ export default function useGraphEditor() {
   }
 
   function applyPreviewStorageMutationToState(run, sourceScreen, vars, storage) {
-    const key = normalizePreviewVarKey(run?.key)
-    const valueSpec = String(run?.value || '').trim()
-    if (!key || !valueSpec) {
-      return null
-    }
-
-    const resolvedValue = renderPreviewValueTemplate(valueSpec, sourceScreen, vars, storage)
-    return {
-      ...(storage || {}),
-      [key]: String(resolvedValue ?? '')
-    }
+    return applyPreviewStorageMutationState(run, sourceScreen, vars, storage, getPreviewRuntimeDeps())
   }
 
   function applyPreviewStorageMutation(run, sourceScreen) {
@@ -779,68 +624,6 @@ export default function useGraphEditor() {
     }
     setPreviewStorage(nextStorage)
     return true
-  }
-
-  function executePreviewHookRun(run, sourceScreen, vars, storage) {
-    if (!run || !run.type) {
-      return { vars, storage, redirect: '' }
-    }
-
-    if (run.type === 'navigate') {
-      if (!evaluatePreviewCondition(run.condition, vars)) {
-        return { vars, storage, redirect: '' }
-      }
-      return {
-        vars,
-        storage,
-        redirect: run.screen || ''
-      }
-    }
-
-    if (run.type === 'set_var') {
-      const nextVars = applyPreviewVarMutationToState(run, vars)
-      return {
-        vars: nextVars || vars,
-        storage,
-        redirect: ''
-      }
-    }
-
-    if (run.type === 'store') {
-      const nextStorage = applyPreviewStorageMutationToState(run, sourceScreen, vars, storage)
-      return {
-        vars,
-        storage: nextStorage || storage,
-        redirect: ''
-      }
-    }
-
-    if (run.type === 'effect') {
-      return { vars, storage, redirect: '' }
-    }
-
-    return { vars, storage, redirect: '' }
-  }
-
-  function executePreviewHookSequence(runs, sourceScreen, vars, storage) {
-    let nextVars = { ...(vars || {}) }
-    let nextStorage = { ...(storage || {}) }
-    let redirect = ''
-
-    ;(runs || []).forEach((run) => {
-      const result = executePreviewHookRun(run, sourceScreen, nextVars, nextStorage)
-      nextVars = result.vars
-      nextStorage = result.storage
-      if (result.redirect) {
-        redirect = result.redirect
-      }
-    })
-
-    return {
-      vars: nextVars,
-      storage: nextStorage,
-      redirect
-    }
   }
 
   function jumpPreviewTo(screenId, options = {}) {
@@ -861,48 +644,28 @@ export default function useGraphEditor() {
       return true
     }
 
-    if (shouldRunLifecycle && sourceScreen && sourceScreen.id !== targetScreenId) {
-      const exitResult = executePreviewHookSequence(sourceScreen.onExit, sourceScreen, nextVars, nextStorage)
-      nextVars = exitResult.vars
-      nextStorage = exitResult.storage
-      if (exitResult.redirect) {
-        targetScreenId = exitResult.redirect
-      }
-    }
+    const result = computePreviewJumpInRuntime(
+      graph,
+      targetScreenId,
+      {
+        ...options,
+        forceLifecycle: options.forceLifecycle,
+        runLifecycle: shouldRunLifecycle,
+        sourceScreen,
+        storage: nextStorage,
+        timerDeadline: previewTimerDeadline,
+        vars: nextVars
+      },
+      getPreviewRuntimeDeps()
+    )
 
-    let depth = 0
-    while (shouldRunLifecycle && depth < 8) {
-      const nextScreen = graph.screens[targetScreenId]
-      if (!nextScreen) {
-        return false
-      }
-
-      const enterResult = executePreviewHookSequence(nextScreen.onEnter, nextScreen, nextVars, nextStorage)
-      nextVars = enterResult.vars
-      nextStorage = enterResult.storage
-      if (enterResult.redirect && enterResult.redirect !== targetScreenId) {
-        targetScreenId = enterResult.redirect
-        depth += 1
-        continue
-      }
-      break
-    }
-
-    if (depth >= 8) {
+    if (!result.ok) {
       return false
     }
 
-    const targetScreen = graph.screens[targetScreenId]
-    const nextTimerDeadline =
-      targetScreen?.timer && (sourceScreen?.id !== targetScreenId || options.forceLifecycle)
-        ? Date.now() + Math.max(100, Number(targetScreen.timer.durationMs || 5000))
-        : sourceScreen?.id === targetScreenId
-          ? previewTimerDeadline
-          : null
-
-    setPreviewVars(nextVars)
-    setPreviewStorage(nextStorage)
-    applyPreviewScreenState(targetScreenId, { ...options, nextTimerDeadline })
+    setPreviewVars(result.vars)
+    setPreviewStorage(result.storage)
+    applyPreviewScreenState(result.targetScreenId, { ...options, nextTimerDeadline: result.nextTimerDeadline })
     return true
   }
 
@@ -1036,221 +799,38 @@ export default function useGraphEditor() {
     runPreviewAction(selectedAction.run, selectedAction.label || selectedAction.id || 'screen action', sourceScreen)
   }
 
-  const handleToSlot = {
-    'slot-up': 'up',
-    'slot-select': 'select',
-    'slot-down': 'down'
-  }
-
   const handleConnect = useCallback(
     (connection) => {
-      const { source, sourceHandle, target } = connection
-      if (!source || !sourceHandle || !target) {
-        return
-      }
-
-      const screen = graph.screens[source]
-      if (!screen) {
-        return
-      }
-
-      if (handleToSlot[sourceHandle]) {
-        if (!screenUsesButtonSlots(screen)) {
-          setNotice({ type: 'error', text: 'Button slot links currently create card action-bar actions.' })
-          return
-        }
-
-        const slot = handleToSlot[sourceHandle]
-        const existingAction = getScreenActions(screen).find((action) => action.slot === slot)
-
-        if (existingAction) {
-          setGraph((prev) => {
-            const currentScreen = prev.screens[source]
-            if (!currentScreen || currentScreen.type !== 'card') {
-              return prev
-            }
-
-            const nextActions = getScreenActions(currentScreen).map((action) => {
-              if (action.slot !== slot) {
-                return action
-              }
-              return {
-                ...action,
-                value: isRunTargetId(target) ? slot : target,
-                run: buildRunForCanvasTarget(target, action.run || {})
-              }
-            })
-
-            return {
-              ...prev,
-              screens: {
-                ...prev.screens,
-                [source]: {
-                  ...currentScreen,
-                  actions: nextActions
-                }
-              }
-            }
-          })
-          setNotice({ type: 'success', text: `Linked ${slot} to ${describeCanvasTarget(target)}` })
-          setSelectedScreenId(source)
-          setSelectedNodeId(source)
-          return
-        }
-
-        setGraph((prev) => {
-          const currentScreen = prev.screens[source]
-          if (!currentScreen || currentScreen.type !== 'card') {
-            return prev
-          }
-
-          const actions = getScreenActions(currentScreen).slice()
-          actions.push({
-            slot,
-            id: ensureUniqueEntityId(actions, `${slot}_action`, 'action'),
-            icon: 'check',
-            label: defaultCardActionLabelForLink(slot, target),
-            value: isRunTargetId(target) ? slot : target,
-            run: buildRunForCanvasTarget(target)
-          })
-
-          return {
-            ...prev,
-            screens: {
-              ...prev.screens,
-              [source]: {
-                ...currentScreen,
-                actions
-              }
-            }
-          }
-        })
-        setNotice({ type: 'success', text: `Created ${slot} action to ${describeCanvasTarget(target)}` })
-        setSelectedScreenId(source)
-        setSelectedNodeId(source)
-        return
-      }
-
-      if (sourceHandle === 'menu-action-create') {
-        if (!screenUsesSelectDrawer(screen)) {
-          setNotice({ type: 'error', text: 'Action-menu links apply to scroll screens' })
-          return
-        }
-
-        if (getScreenActions(screen).length >= graphBuilderSpec.limits.maxMenuActions) {
-          setNotice({ type: 'error', text: 'Maximum action-menu items reached' })
-          return
-        }
-
-        setGraph((prev) => {
-          const currentScreen = prev.screens[source]
-          if (!currentScreen || !screenUsesSelectDrawer(currentScreen)) {
-            return prev
-          }
-
-          const actions = getScreenActions(currentScreen).slice()
-          actions.push({
-            id: ensureUniqueEntityId(actions, 'drawer_item', 'drawer_item'),
-            label: defaultMenuActionLabelForLink(target),
-            value: isRunTargetId(target) ? '' : target,
-            run: buildRunForCanvasTarget(target)
-          })
-
-          return {
-            ...prev,
-            screens: {
-              ...prev.screens,
-              [source]: {
-                ...currentScreen,
-                actions
-              }
-            }
-          }
-        })
-        setNotice({ type: 'success', text: `Created action-menu item to ${describeCanvasTarget(target)}` })
-        setSelectedScreenId(source)
-        setSelectedNodeId(source)
-        return
-      }
+      let result = { graph, kind: 'ignored' }
 
       setGraph((prev) => {
-        const currentScreen = prev.screens[source]
-        if (!currentScreen) {
-          return prev
-        }
-
-        if (sourceHandle.startsWith('item-')) {
-          if (currentScreen.type !== 'menu') {
-            setNotice({ type: 'error', text: 'Item links apply to menu screens' })
-            return prev
-          }
-          const key = sourceHandle.slice('item-'.length)
-          const items = Array.isArray(currentScreen.items) ? currentScreen.items.slice() : []
-          const nextItems = items.map((item, idx) => {
-            const matchId = item.id ? String(item.id) === key : false
-            const matchIndex = !item.id && String(idx) === key
-            if (!matchId && !matchIndex) {
-              return item
-            }
-            return {
-              ...item,
-              run: buildRunForCanvasTarget(target, item.run || {})
-            }
-          })
-
-          setNotice({ type: 'success', text: `Linked item to ${describeCanvasTarget(target)}` })
-          setSelectedScreenId(source)
-          setSelectedNodeId(source)
-          return {
-            ...prev,
-            screens: {
-              ...prev.screens,
-              [source]: {
-                ...currentScreen,
-                items: nextItems
-              }
-            }
-          }
-        }
-
-        if (sourceHandle.startsWith('action-')) {
-          if (!screenSupportsActions(currentScreen)) {
-            setNotice({ type: 'error', text: 'Action links apply to screens with actions' })
-            return prev
-          }
-          const key = sourceHandle.slice('action-'.length)
-          const actions = getScreenActions(currentScreen).slice()
-          const nextActions = actions.map((action, idx) => {
-            const matchId = action.id ? String(action.id) === key : false
-            const matchIndex = !action.id && String(idx) === key
-            if (!matchId && !matchIndex) {
-              return action
-            }
-            return {
-              ...action,
-              run: buildRunForCanvasTarget(target, action.run || {}),
-              value: isRunTargetId(target) ? action.value || action.label || action.id : target
-            }
-          })
-
-          setNotice({ type: 'success', text: `Linked ${screenUsesSelectDrawer(currentScreen) ? 'action-menu item' : 'action'} to ${describeCanvasTarget(target)}` })
-          setSelectedScreenId(source)
-          setSelectedNodeId(source)
-          return {
-            ...prev,
-            screens: {
-              ...prev.screens,
-              [source]: {
-                ...currentScreen,
-                actions: nextActions
-              }
-            }
-          }
-        }
-
-        setNotice({ type: 'error', text: 'Handle not linkable' })
-        return prev
+        result = connectCanvasHandleInGraph(prev, connection, {
+          ensureUniqueEntityId,
+          getRunTargetDefinition,
+          getScreenActions,
+          graphBuilderSpec,
+          isRunTargetId,
+          maxMenuActions: graphBuilderSpec.limits.maxMenuActions,
+          pruneRunForType,
+          screenSupportsActions,
+          screenUsesButtonSlots,
+          screenUsesSelectDrawer
+        })
+        return result.graph
       })
+
+      if (result.kind === 'error') {
+        setNotice({ type: 'error', text: result.message })
+        return
+      }
+
+      if (result.kind === 'success') {
+        setNotice({ type: 'success', text: result.message })
+        if (result.focusSourceId) {
+          setSelectedScreenId(result.focusSourceId)
+          setSelectedNodeId(result.focusSourceId)
+        }
+      }
     },
     [graph, graphBuilderSpec]
   )
@@ -1582,32 +1162,18 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const items = Array.isArray(screen.items) ? screen.items.slice() : []
-      const id = ensureUniqueEntityId(items, 'item', 'item')
-      items.push({ id, label: 'New Item', value: '', labelTemplate: '', run: null })
-      return { ...screen, items }
-    })
+    updateSelectedScreen((screen) => addMenuItemToScreen(screen, { ensureUniqueEntityId }))
   }
 
   function removeMenuItem(index) {
-    updateSelectedScreen((screen) => {
-      const items = Array.isArray(screen.items) ? screen.items.slice() : []
-      items.splice(index, 1)
-      return { ...screen, items }
-    })
+    updateSelectedScreen((screen) => removeMenuItemFromScreen(screen, index))
   }
 
   function updateMenuItem(index, field, rawValue) {
     const value =
       field.maxLen && typeof rawValue === 'string' ? rawValue.slice(0, field.maxLen) : rawValue
 
-    updateSelectedScreen((screen) => {
-      const items = Array.isArray(screen.items) ? screen.items.slice() : []
-      const current = items[index] || {}
-      items[index] = updateEntityField(current, field.id, value)
-      return { ...screen, items }
-    })
+    updateSelectedScreen((screen) => updateMenuItemInScreen(screen, index, field.id, value, { updateEntityField }))
   }
 
   function addScreenAction() {
@@ -1625,55 +1191,27 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const actions = getScreenActions(screen).slice()
-
-      if (screenUsesSelectDrawer(screen)) {
-        const id = ensureUniqueEntityId(actions, 'drawer_item', 'drawer_item')
-        actions.push({
-          id,
-          label: 'Action Menu Item',
-          value: '',
-          run: null
-        })
-      } else {
-        const usedSlots = new Set(actions.map((action) => action.slot))
-        const slot =
-          graphBuilderSpec.enums.actionSlots.find((candidate) => !usedSlots.has(candidate)) || 'select'
-        const id = ensureUniqueEntityId(actions, 'action', 'action')
-
-        actions.push({
-          slot,
-          id,
-          icon: 'check',
-          label: 'Action',
-          value: '',
-          run: null
-        })
-      }
-
-      return { ...screen, actions }
-    })
+    updateSelectedScreen((screen) =>
+      addScreenActionToScreen(screen, {
+        ensureUniqueEntityId,
+        getScreenActions,
+        screenUsesSelectDrawer,
+        actionSlots: graphBuilderSpec.enums.actionSlots
+      })
+    )
   }
 
   function removeScreenAction(index) {
-    updateSelectedScreen((screen) => {
-      const actions = getScreenActions(screen).slice()
-      actions.splice(index, 1)
-      return { ...screen, actions }
-    })
+    updateSelectedScreen((screen) => removeScreenActionFromScreen(screen, index, { getScreenActions }))
   }
 
   function updateScreenAction(index, field, rawValue) {
     const value =
       field.maxLen && typeof rawValue === 'string' ? rawValue.slice(0, field.maxLen) : rawValue
 
-    updateSelectedScreen((screen) => {
-      const actions = getScreenActions(screen).slice()
-      const current = actions[index] || {}
-      actions[index] = updateEntityField(current, field.id, value)
-      return { ...screen, actions }
-    })
+    updateSelectedScreen((screen) =>
+      updateScreenActionInScreen(screen, index, field.id, value, { getScreenActions, updateEntityField })
+    )
   }
 
   function addScreenHook(hookKey) {
@@ -1691,53 +1229,28 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const hooks = getScreenHookRuns(screen, hookKey).slice()
-      hooks.push(createDefaultScreenHookRun())
-      return {
-        ...screen,
-        [hookKey]: hooks
-      }
-    })
+    updateSelectedScreen((screen) =>
+      addScreenHookToScreen(screen, hookKey, { getScreenHookRuns, createDefaultScreenHookRun })
+    )
   }
 
   function removeScreenHook(hookKey, index) {
-    updateSelectedScreen((screen) => {
-      const hooks = getScreenHookRuns(screen, hookKey).slice()
-      hooks.splice(index, 1)
-      const next = { ...screen }
-      if (hooks.length) {
-        next[hookKey] = hooks
-      } else {
-        delete next[hookKey]
-      }
-      return next
-    })
+    updateSelectedScreen((screen) =>
+      removeScreenHookFromScreen(screen, hookKey, index, { getScreenHookRuns })
+    )
   }
 
   function updateScreenHook(hookKey, index, field, rawValue) {
     const value =
       field.maxLen && typeof rawValue === 'string' ? rawValue.slice(0, field.maxLen) : rawValue
 
-    updateSelectedScreen((screen) => {
-      const hooks = getScreenHookRuns(screen, hookKey).slice()
-      const currentRun = hooks[index] || createDefaultScreenHookRun()
-      const nextEntity = updateRunField({ run: currentRun }, field.id, value)
-
-      if (!nextEntity.run) {
-        hooks.splice(index, 1)
-      } else {
-        hooks[index] = nextEntity.run
-      }
-
-      const next = { ...screen }
-      if (hooks.length) {
-        next[hookKey] = hooks
-      } else {
-        delete next[hookKey]
-      }
-      return next
-    })
+    updateSelectedScreen((screen) =>
+      updateScreenHookInScreen(screen, hookKey, index, field.id, value, {
+        getScreenHookRuns,
+        createDefaultScreenHookRun,
+        updateRunField
+      })
+    )
   }
 
   function updateScreenTimer(field, rawValue) {
@@ -1750,40 +1263,12 @@ export default function useGraphEditor() {
       return
     }
 
-    if (field.id === 'timer.durationMs') {
-      const nextDuration = Math.max(100, Math.min(86400000, Number.parseInt(String(rawValue || '0'), 10) || 5000))
-      updateSelectedScreen((screen) => {
-        const currentTimer = screen.timer || createDefaultScreenTimer()
-        return {
-          ...screen,
-          timer: {
-            ...currentTimer,
-            durationMs: nextDuration
-          }
-        }
-      })
-      return
-    }
-
     const value =
       field.maxLen && typeof rawValue === 'string' ? rawValue.slice(0, field.maxLen) : rawValue
 
-    updateSelectedScreen((screen) => {
-      const currentTimer = screen.timer || createDefaultScreenTimer()
-      const nextEntity = updateRunField({ run: currentTimer.run }, field.id, value)
-      if (!nextEntity.run) {
-        const next = { ...screen }
-        delete next.timer
-        return next
-      }
-      return {
-        ...screen,
-        timer: {
-          ...currentTimer,
-          run: nextEntity.run
-        }
-      }
-    })
+    updateSelectedScreen((screen) =>
+      updateScreenTimerInScreen(screen, field.id, value, { createDefaultScreenTimer, updateRunField })
+    )
   }
 
   function toggleScreenTimer(enabled) {
@@ -1796,18 +1281,9 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      if (!enabled) {
-        const next = { ...screen }
-        delete next.timer
-        return next
-      }
-
-      return {
-        ...screen,
-        timer: screen.timer || createDefaultScreenTimer()
-      }
-    })
+    updateSelectedScreen((screen) =>
+      toggleScreenTimerInScreen(screen, enabled, { createDefaultScreenTimer })
+    )
   }
 
   function updateMotionField(fieldId, rawValue) {
@@ -1815,23 +1291,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const motion = normalizeMotion(screen.motion || createDefaultMotion())
-      let value = rawValue
-      if (fieldId === 'timelineMs') {
-        value = coerceDrawNumber(rawValue, Number(motion.timelineMs || 1800), 240, 20000)
-      }
-      const compiled = buildCompiledMotionState({
-        ...motion,
-        [fieldId]: value
-      }, screen.canvas)
-
-      return {
-        ...screen,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) => updateMotionFieldInScreen(screen, fieldId, rawValue, getDrawMutationDeps()))
   }
 
   function updateCanvasTemplate(template) {
@@ -1839,33 +1299,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const nextCanvas =
-        String(template || 'freeform') === 'header_list'
-          ? normalizeCanvas(screen.canvas?.template === 'header_list'
-              ? screen.canvas
-              : createDefaultCanvas({ header: screen.title || 'Main Menu' }))
-          : normalizeCanvas({ template: 'freeform' })
-
-      if (!screen.motion) {
-        return {
-          ...screen,
-          canvas: nextCanvas
-        }
-      }
-
-      const compiled = buildCompiledMotionState(
-        nextCanvas.template === 'header_list' ? createDefaultCanvasMotion(nextCanvas) : screen.motion,
-        nextCanvas
-      )
-
-      return {
-        ...screen,
-        canvas: compiled.canvas,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) => updateCanvasTemplateInScreen(screen, template, getDrawMutationDeps()))
   }
 
   function updateCanvasHeader(rawValue) {
@@ -1873,28 +1307,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const canvas = normalizeCanvas(screen.canvas || createDefaultCanvas({ header: screen.title || 'Main Menu' }))
-      const nextCanvas = {
-        ...canvas,
-        header: String(rawValue || '').slice(0, graphBuilderSpec.limits.maxTitleLen || 30)
-      }
-
-      if (!screen.motion) {
-        return {
-          ...screen,
-          canvas: nextCanvas
-        }
-      }
-
-      const compiled = buildCompiledMotionState(screen.motion, nextCanvas)
-      return {
-        ...screen,
-        canvas: compiled.canvas,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) => updateCanvasHeaderInScreen(screen, rawValue, getDrawMutationDeps()))
   }
 
   function addCanvasItem() {
@@ -1902,34 +1315,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const canvas = normalizeCanvas(screen.canvas || createDefaultCanvas({ header: screen.title || 'Main Menu' }))
-      const items = Array.isArray(canvas.items) ? canvas.items.slice() : []
-      if (items.length >= 4) {
-        return screen
-      }
-
-      const id = ensureUniqueEntityId(items, 'item', 'item')
-      const nextCanvas = {
-        ...canvas,
-        items: items.concat([{ id, label: `Item ${items.length + 1}` }])
-      }
-
-      if (!screen.motion) {
-        return {
-          ...screen,
-          canvas: nextCanvas
-        }
-      }
-
-      const compiled = buildCompiledMotionState(screen.motion, nextCanvas)
-      return {
-        ...screen,
-        canvas: compiled.canvas,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) => addCanvasItemToScreen(screen, getDrawMutationDeps()))
   }
 
   function removeCanvasItem(index) {
@@ -1937,30 +1323,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const canvas = normalizeCanvas(screen.canvas || createDefaultCanvas({ header: screen.title || 'Main Menu' }))
-      const items = Array.isArray(canvas.items) ? canvas.items.slice() : []
-      items.splice(index, 1)
-      const nextCanvas = {
-        ...canvas,
-        items
-      }
-
-      if (!screen.motion) {
-        return {
-          ...screen,
-          canvas: nextCanvas
-        }
-      }
-
-      const compiled = buildCompiledMotionState(screen.motion, nextCanvas)
-      return {
-        ...screen,
-        canvas: compiled.canvas,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) => removeCanvasItemFromScreen(screen, index, getDrawMutationDeps()))
   }
 
   function updateCanvasItem(index, rawValue) {
@@ -1968,38 +1331,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const canvas = normalizeCanvas(screen.canvas || createDefaultCanvas({ header: screen.title || 'Main Menu' }))
-      const items = Array.isArray(canvas.items) ? canvas.items.slice() : []
-      const current = items[index]
-      if (!current) {
-        return screen
-      }
-
-      items[index] = {
-        ...current,
-        label: String(rawValue || '').slice(0, graphBuilderSpec.limits.maxOptionLabelLen || 18)
-      }
-      const nextCanvas = {
-        ...canvas,
-        items
-      }
-
-      if (!screen.motion) {
-        return {
-          ...screen,
-          canvas: nextCanvas
-        }
-      }
-
-      const compiled = buildCompiledMotionState(screen.motion, nextCanvas)
-      return {
-        ...screen,
-        canvas: compiled.canvas,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) => updateCanvasItemInScreen(screen, index, rawValue, getDrawMutationDeps()))
   }
 
   function addMotionTrack() {
@@ -2014,35 +1346,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const nextMotion = normalizeMotion(screen.motion || createDefaultMotion())
-      const nextTracks = Array.isArray(nextMotion.tracks) ? nextMotion.tracks.slice() : []
-      nextTracks.push(
-        createDefaultMotionTrack(
-          nextTracks,
-          screen.canvas?.template === 'header_list'
-            ? {
-                target: 'items',
-                label: `Items ${nextTracks.length + 1}`,
-                preset: 'slide_left',
-                kind: 'text',
-                placement: 'middle',
-                color: 'ink',
-                fill: true
-              }
-            : undefined
-        )
-      )
-      const compiled = buildCompiledMotionState({
-        ...nextMotion,
-        tracks: nextTracks
-      }, screen.canvas)
-      return {
-        ...screen,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) => addMotionTrackToScreen(screen, getDrawMutationDeps()))
   }
 
   function removeMotionTrack(index) {
@@ -2050,20 +1354,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const motion = normalizeMotion(screen.motion || createDefaultMotion())
-      const tracks = Array.isArray(motion.tracks) ? motion.tracks.slice() : []
-      tracks.splice(index, 1)
-      const compiled = buildCompiledMotionState({
-        ...motion,
-        tracks
-      }, screen.canvas)
-      return {
-        ...screen,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) => removeMotionTrackFromScreen(screen, index, getDrawMutationDeps()))
   }
 
   function updateMotionTrack(index, fieldId, rawValue) {
@@ -2071,38 +1362,9 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const motion = normalizeMotion(screen.motion || createDefaultMotion())
-      const tracks = Array.isArray(motion.tracks) ? motion.tracks.slice() : []
-      const current = tracks[index] || createDefaultMotionTrack(tracks)
-      let value = rawValue
-
-      if (fieldId === 'fill') {
-        value = !!rawValue
-      } else if (fieldId === 'id') {
-        const otherTracks = tracks.filter((_, trackIndex) => trackIndex !== index)
-        value = ensureUniqueEntityId(otherTracks, rawValue, current.id || 'track')
-      } else if (fieldId === 'delayMs') {
-        value = coerceDrawNumber(rawValue, Number(current.delayMs || 0), 0, 20000)
-      } else {
-        value = String(rawValue || '')
-      }
-
-      tracks[index] = {
-        ...current,
-        [fieldId]: value
-      }
-      const compiled = buildCompiledMotionState({
-        ...motion,
-        tracks
-      }, screen.canvas)
-
-      return {
-        ...screen,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) =>
+      updateMotionTrackInScreen(screen, index, fieldId, rawValue, getDrawMutationDeps())
+    )
   }
 
   function detachMotionToRaw() {
@@ -2110,14 +1372,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const next = {
-        ...screen,
-        drawing: screen.drawing || createDefaultDrawing()
-      }
-      delete next.motion
-      return next
-    })
+    updateSelectedScreen((screen) => detachMotionToRawInScreen(screen, getDrawMutationDeps()))
 
     setNotice({ type: 'success', text: 'Detached preset motion to raw steps' })
   }
@@ -2127,19 +1382,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const baseMotion =
-        screen.motion ||
-        (screen.canvas?.template === 'header_list'
-          ? createDefaultCanvasMotion(screen.canvas)
-          : createDefaultMotion())
-      const compiled = buildCompiledMotionState(baseMotion, screen.canvas)
-      return {
-        ...screen,
-        motion: compiled.motion,
-        drawing: compiled.drawing
-      }
-    })
+    updateSelectedScreen((screen) => enablePresetMotionInScreen(screen, getDrawMutationDeps()))
 
     setNotice({ type: 'success', text: 'Preset motion enabled' })
   }
@@ -2149,21 +1392,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const drawing = screen.drawing || createDefaultDrawing()
-      let value = rawValue
-      if (fieldId === 'timelineMs') {
-        value = coerceDrawNumber(rawValue, Number(drawing.timelineMs || 1800), 240, 20000)
-      }
-
-      return {
-        ...screen,
-        drawing: {
-          ...drawing,
-          [fieldId]: value
-        }
-      }
-    })
+    updateSelectedScreen((screen) => updateDrawFieldInScreen(screen, fieldId, rawValue, getDrawMutationDeps()))
   }
 
   function addDrawStep() {
@@ -2178,18 +1407,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const nextDrawing = screen.drawing || createDefaultDrawing()
-      const nextSteps = Array.isArray(nextDrawing.steps) ? nextDrawing.steps.slice() : []
-      nextSteps.push(createDefaultDrawStep(nextSteps))
-      return {
-        ...screen,
-        drawing: {
-          ...nextDrawing,
-          steps: clampDrawStepCount(nextSteps)
-        }
-      }
-    })
+    updateSelectedScreen((screen) => addDrawStepToScreen(screen, getDrawMutationDeps()))
   }
 
   function removeDrawStep(index) {
@@ -2197,18 +1415,7 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const drawing = screen.drawing || createDefaultDrawing()
-      const steps = Array.isArray(drawing.steps) ? drawing.steps.slice() : []
-      steps.splice(index, 1)
-      return {
-        ...screen,
-        drawing: {
-          ...drawing,
-          steps
-        }
-      }
-    })
+    updateSelectedScreen((screen) => removeDrawStepFromScreen(screen, index, getDrawMutationDeps()))
   }
 
   function updateDrawStep(index, fieldId, rawValue) {
@@ -2216,75 +1423,24 @@ export default function useGraphEditor() {
       return
     }
 
-    updateSelectedScreen((screen) => {
-      const drawing = screen.drawing || createDefaultDrawing()
-      const steps = Array.isArray(drawing.steps) ? drawing.steps.slice() : []
-      const current = steps[index] || createDefaultDrawStep(steps)
-      let value = rawValue
-
-      if (fieldId === 'fill') {
-        value = !!rawValue
-      } else if (fieldId === 'id') {
-        const otherSteps = steps.filter((_, stepIndex) => stepIndex !== index)
-        value = ensureUniqueEntityId(otherSteps, rawValue, current.id || 'step')
-      } else if (isDrawStepNumericField(fieldId)) {
-        const { min, max } = getDrawStepFieldLimit(fieldId)
-        value = coerceDrawNumber(rawValue, Number(current[fieldId] || 0), min, max)
-      } else {
-        value = String(rawValue || '')
-      }
-
-      steps[index] = {
-        ...current,
-        [fieldId]: value
-      }
-
-      return {
-        ...screen,
-        drawing: {
-          ...drawing,
-          steps: clampDrawStepCount(steps)
-        }
-      }
-    })
+    updateSelectedScreen((screen) =>
+      updateDrawStepInScreen(screen, index, fieldId, rawValue, getDrawMutationDeps())
+    )
   }
 
   function handleImport() {
-    let parsed
-    try {
-      parsed = JSON.parse(importText)
-    } catch (error) {
-      setNotice({ type: 'error', text: `Import JSON parse error: ${error.message}` })
+    const result = parseImportedGraphText(importText, {
+      normalizeCanonicalGraph: graphSchema.normalizeCanonicalGraph,
+      inferBuilderMetaFromGraph
+    })
+
+    if (!result.ok) {
+      setNotice({ type: 'error', text: result.error })
       return
     }
 
-    const candidate = parsed && parsed.graph ? parsed.graph : parsed
-    const normalized = graphSchema.normalizeCanonicalGraph(candidate)
-
-    if (!normalized) {
-      setNotice({ type: 'error', text: 'Import failed. Payload is not a canonical graph.' })
-      return
-    }
-
-    if (candidate._builderMeta) {
-      normalized._builderMeta = candidate._builderMeta
-    } else {
-      normalized._builderMeta = inferBuilderMetaFromGraph(normalized)
-    }
-
-    setGraph(normalized)
-    setSelectedScreenId(normalized.entryScreenId)
-    setSelectedNodeId('')
-    setPreviewPlaceholderScreen(null)
-    setPreviewScreenId(normalized.entryScreenId)
-    setPreviewHistory([])
-    setBindingsDraftByScreen({})
-    nodePositionsRef.current = {}
-    runTargetPositionsRef.current = {}
-    setVisibleRunTargetIds([])
-    setLayoutTick((tick) => tick + 1)
+    applyLoadedGraphState(result.graph)
     setNotice({ type: 'success', text: 'Imported and normalized successfully' })
-    setTimeout(() => flowInstance?.fitView({ padding: 0.2 }), 10)
   }
 
   function loadTemplate(templateId) {
@@ -2293,32 +1449,20 @@ export default function useGraphEditor() {
       setNotice({ type: 'error', text: `Template "${templateId}" not found` })
       return
     }
-    const normalized = graphSchema.normalizeCanonicalGraph(JSON.parse(JSON.stringify(template.graph)))
+    const normalized = prepareTemplateGraph(template, {
+      normalizeCanonicalGraph: graphSchema.normalizeCanonicalGraph,
+      inferBuilderMetaFromGraph
+    })
     if (!normalized) {
       setNotice({ type: 'error', text: `Template "${template.label}" failed to normalize` })
       return
     }
-    if (template.graph._builderMeta) {
-      normalized._builderMeta = template.graph._builderMeta
-    } else {
-      normalized._builderMeta = inferBuilderMetaFromGraph(normalized)
-    }
-    setGraph(normalized)
-    setImportText(JSON.stringify(normalized, null, 2))
-    setSelectedScreenId(normalized.entryScreenId)
-    setSelectedNodeId('')
-    setPreviewPlaceholderScreen(null)
-    setPreviewScreenId(normalized.entryScreenId)
-    setPreviewHistory([])
-    setPreviewVars({})
-    setPreviewStorage({})
-    setBindingsDraftByScreen({})
-    nodePositionsRef.current = {}
-    runTargetPositionsRef.current = {}
-    setVisibleRunTargetIds([])
-    setLayoutTick((tick) => tick + 1)
+
+    applyLoadedGraphState(normalized, {
+      setImportText: true,
+      resetPreviewRuntime: true
+    })
     setNotice({ type: 'success', text: `Loaded template: ${template.label}` })
-    setTimeout(() => flowInstance?.fitView({ padding: 0.2 }), 10)
   }
 
   async function handleCopyExport() {
@@ -2355,162 +1499,34 @@ export default function useGraphEditor() {
     setImportText(JSON.stringify(graph, null, 2))
   }
 
-  function setSchemaVersion(nextSchemaVersion) {
-    const nextVersion = String(nextSchemaVersion || '')
-    const descriptor = schemaRegistry.getSchemaDescriptor(nextVersion)
-    if (!descriptor) {
-      setNotice({ type: 'error', text: `Unknown schema version: ${nextVersion}` })
-      return
-    }
-
-    if (graph.schemaVersion === descriptor.schemaVersion) {
-      return
-    }
-
-    const migrated = graphSchema.normalizeCanonicalGraph({
-      ...graph,
-      schemaVersion: descriptor.schemaVersion
-    })
-
-    if (!migrated) {
-      setNotice({ type: 'error', text: `Could not migrate graph to ${descriptor.schemaVersion}` })
-      return
-    }
-
-    const supportedRunTypes = descriptor.enums?.runTypes || []
-    const nextVisibleRunTargetIds = visibleRunTargetIds.filter((targetId) => {
-      const target = getRunTargetDefinition(targetId)
-      return !!target && supportedRunTypes.includes(target.runType)
-    })
-    const nextRequiredRunTargetIds = collectRequiredRunTargetIds(migrated)
-    const nextSelectedScreenId = migrated.screens[selectedScreenId] ? selectedScreenId : migrated.entryScreenId
-    const nextPreviewScreenId =
-      previewScreenId !== PREVIEW_PLACEHOLDER_ID && migrated.screens[previewScreenId]
-        ? previewScreenId
-        : migrated.entryScreenId
-
-    let nextSelectedNodeId = ''
-    if (selectedNodeId) {
-      if (!isRunTargetId(selectedNodeId) && migrated.screens[selectedNodeId]) {
-        nextSelectedNodeId = selectedNodeId
-      } else if (
-        isRunTargetId(selectedNodeId) &&
-        (nextVisibleRunTargetIds.includes(selectedNodeId) || nextRequiredRunTargetIds.includes(selectedNodeId))
-      ) {
-        nextSelectedNodeId = selectedNodeId
-      }
-    }
-
-    setGraph(migrated)
-    setSelectedScreenId(nextSelectedScreenId)
-    setSelectedNodeId(nextSelectedNodeId)
-    setPreviewPlaceholderScreen(null)
-    setPreviewScreenId(nextPreviewScreenId)
-    setPreviewHistory((prev) => prev.filter((screenId) => migrated.screens[screenId]))
-    setBindingsDraftByScreen((prev) =>
-      Object.fromEntries(Object.entries(prev).filter(([screenId]) => migrated.screens[screenId]))
-    )
-    runTargetPositionsRef.current = Object.fromEntries(
-      Object.entries(runTargetPositionsRef.current).filter(([targetId]) => nextVisibleRunTargetIds.includes(targetId))
-    )
-    setVisibleRunTargetIds(nextVisibleRunTargetIds)
-    setLayoutTick((tick) => tick + 1)
-    setNotice({ type: 'success', text: `Migrated graph to ${descriptor.schemaVersion}` })
-    setTimeout(() => flowInstance?.fitView({ padding: 0.2, duration: 250 }), 10)
-  }
-
   function setEntryScreenId(id) {
-    setGraph((prev) => ({ ...prev, entryScreenId: id }))
+    setGraph((prev) => setEntryScreenIdInGraph(prev, id))
   }
 
   function addVariable(key, defaultValue = '', typeHint = 'string') {
     const cleanKey = sanitizeId(key, 'var')
-    setGraph((prev) => {
-      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
-      if (meta.variables.some((v) => v.key === cleanKey)) {
-        return prev
-      }
-      return {
-        ...prev,
-        _builderMeta: {
-          ...meta,
-          variables: [...meta.variables, { key: cleanKey, defaultValue, typeHint }]
-        }
-      }
-    })
+    setGraph((prev) => addVariableToGraph(prev, cleanKey, defaultValue, typeHint))
   }
 
   function removeVariable(key) {
-    setGraph((prev) => {
-      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
-      return {
-        ...prev,
-        _builderMeta: {
-          ...meta,
-          variables: meta.variables.filter((v) => v.key !== key)
-        }
-      }
-    })
+    setGraph((prev) => removeVariableFromGraph(prev, key))
   }
 
   function updateVariable(key, field, value) {
-    setGraph((prev) => {
-      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
-      return {
-        ...prev,
-        _builderMeta: {
-          ...meta,
-          variables: meta.variables.map((v) =>
-            v.key === key ? { ...v, [field]: value } : v
-          )
-        }
-      }
-    })
+    setGraph((prev) => updateVariableInGraph(prev, key, field, value))
   }
 
   function addStorageKey(key, typeHint = 'string') {
     const cleanKey = sanitizeId(key, 'store')
-    setGraph((prev) => {
-      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
-      if (meta.storageKeys.some((s) => s.key === cleanKey)) {
-        return prev
-      }
-      return {
-        ...prev,
-        _builderMeta: {
-          ...meta,
-          storageKeys: [...meta.storageKeys, { key: cleanKey, typeHint }]
-        }
-      }
-    })
+    setGraph((prev) => addStorageKeyToGraph(prev, cleanKey, typeHint))
   }
 
   function removeStorageKey(key) {
-    setGraph((prev) => {
-      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
-      return {
-        ...prev,
-        _builderMeta: {
-          ...meta,
-          storageKeys: meta.storageKeys.filter((s) => s.key !== key)
-        }
-      }
-    })
+    setGraph((prev) => removeStorageKeyFromGraph(prev, key))
   }
 
   function updateStorageKey(key, field, value) {
-    setGraph((prev) => {
-      const meta = prev._builderMeta || { variables: [], storageKeys: [] }
-      return {
-        ...prev,
-        _builderMeta: {
-          ...meta,
-          storageKeys: meta.storageKeys.map((s) =>
-            s.key === key ? { ...s, [field]: value } : s
-          )
-        }
-      }
-    })
+    setGraph((prev) => updateStorageKeyInGraph(prev, key, field, value))
   }
 
   function declareFromUndeclared(key, kind) {
@@ -2524,63 +1540,20 @@ export default function useGraphEditor() {
   }
 
   function addDataItem(item) {
-    setGraph((prev) => {
-      const meta = prev._builderMeta || { variables: [], storageKeys: [], dataItems: [] }
-      const dataItems = Array.isArray(meta.dataItems) ? meta.dataItems : []
-      if (dataItems.some((d) => d.key === item.key && d.scope === item.scope)) {
-        return prev
-      }
-      return {
-        ...prev,
-        _builderMeta: {
-          ...meta,
-          dataItems: [...dataItems, item]
-        }
-      }
-    })
+    setGraph((prev) => addDataItemToGraph(prev, item))
   }
 
   function removeDataItem(key, scope) {
-    setGraph((prev) => {
-      const meta = prev._builderMeta || { variables: [], storageKeys: [], dataItems: [] }
-      const dataItems = Array.isArray(meta.dataItems) ? meta.dataItems : []
-      return {
-        ...prev,
-        _builderMeta: {
-          ...meta,
-          dataItems: dataItems.filter((d) => !(d.key === key && d.scope === scope))
-        }
-      }
-    })
+    setGraph((prev) => removeDataItemFromGraph(prev, key, scope))
   }
 
   function updateDataItem(key, scope, field, value) {
-    setGraph((prev) => {
-      const meta = prev._builderMeta || { variables: [], storageKeys: [], dataItems: [] }
-      const dataItems = Array.isArray(meta.dataItems) ? meta.dataItems : []
-      return {
-        ...prev,
-        _builderMeta: {
-          ...meta,
-          dataItems: dataItems.map((d) =>
-            d.key === key && d.scope === scope ? { ...d, [field]: value } : d
-          )
-        }
-      }
-    })
+    setGraph((prev) => updateDataItemInGraph(prev, key, scope, field, value))
   }
 
   function setStorageNamespace(rawValue) {
     const nextValue = sanitizeId(rawValue, '')
-    setGraph((prev) => {
-      const next = { ...prev }
-      if (nextValue) {
-        next.storageNamespace = nextValue
-      } else {
-        delete next.storageNamespace
-      }
-      return next
-    })
+    setGraph((prev) => setStorageNamespaceInGraph(prev, nextValue))
   }
 
   return {
@@ -2607,7 +1580,6 @@ export default function useGraphEditor() {
     canExport,
     graphBuilderSpec,
     screenBuilderSpec,
-    schemaVersions,
 
     // Setters
     setImportText,
@@ -2660,7 +1632,6 @@ export default function useGraphEditor() {
     handleEdgesDelete,
     clearLinkByHandle,
     jumpPreviewTo,
-    setSchemaVersion,
     setEntryScreenId,
     setStorageNamespace,
     getBindingsDraft,

@@ -3,6 +3,7 @@
 Use this guide when you want to make your own screens quickly.
 
 This guide matches the real runtime now: one canonical graph schema for built-in screens, imported JSON, and agent responses.
+The canonical authoring/export target is `pebble.sdui.v1.2.0`; older imports are normalized forward when loaded.
 
 For the strict contract, see [SDUI_SCHEMA_SPEC.md](/Users/sam/dev/pebble/pebble-stewie/docs/SDUI_SCHEMA_SPEC.md).
 
@@ -12,7 +13,7 @@ Everything is a graph:
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "root",
   "screens": {
     "root": {
@@ -39,7 +40,7 @@ Think of it like this:
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "done",
   "screens": {
     "done": {
@@ -56,7 +57,7 @@ Think of it like this:
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "root",
   "screens": {
     "root": {
@@ -96,7 +97,7 @@ Think of it like this:
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "confirm",
   "screens": {
     "confirm": {
@@ -141,7 +142,7 @@ Think of it like this:
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "reply",
   "screens": {
     "reply": {
@@ -166,7 +167,7 @@ The runtime adds `Speak response` automatically when `input.mode` is `voice` or 
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1",
+  "schemaVersion": "pebble.sdui.v1.2.0",
   "entryScreenId": "time-card",
   "screens": {
     "time-card": {
@@ -341,7 +342,7 @@ Safer limits:
 
 Before you paste JSON into the app settings page:
 
-1. `schemaVersion` is `pebble.sdui.v1`
+1. `schemaVersion` is `pebble.sdui.v1.2.0`
 2. `entryScreenId` exists in `screens`
 3. each screen has an `id`
 4. menu screens use `items`
