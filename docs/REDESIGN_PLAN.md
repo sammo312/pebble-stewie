@@ -1,5 +1,7 @@
 # Stewie Screen Builder — Redesign Plan
 
+> Status: builder UI proposal. Some ideas here exist in partial form, but this document is not a description of the current app shell.
+
 **Goal**: Make the builder feel intuitive, fast, and approachable — like the best parts of Figma, Notion, and Lucidchart — while respecting that this is a specialized tool for building Pebble watch app flows.
 
 ---

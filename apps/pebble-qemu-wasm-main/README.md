@@ -4,8 +4,6 @@ Pebble smartwatch emulator running in the browser. QEMU compiled to WebAssembly 
 
 **[Demo: PebbleOS in the browser](https://ericmigi.github.io/pebble-qemu-wasm/)**
 
-![Pebble in browser](pebble_wasm_first_frame.png)
-
 ## How it works
 
 Pebble's original emulator used a [custom QEMU 2.5 fork](https://github.com/nicethings/qemu-pebble) with STM32 peripheral models and Pebble-specific board definitions. This project ports those device models (~8,500 lines of C across 27 files) to QEMU 10.1, then compiles the result to WebAssembly using Emscripten's TCI (Tiny Code Interpreter) backend.
@@ -20,7 +18,7 @@ Key pieces:
 
 Or try the [live demo](https://ericmigi.github.io/pebble-qemu-wasm/) — no install needed.
 
-To run locally, you need Python 3 and the pre-built WASM artifacts in `web/`:
+To run locally, you need Python 3 plus local firmware blobs and a generated `web/qemu-system-arm.wasm` file. The repo tracks the HTML/JS loader pieces, but the large firmware and WASM binary are not checked in.
 
 ```sh
 python3 server.py 8080
@@ -29,7 +27,7 @@ open http://localhost:8080
 
 The server adds `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers required for `SharedArrayBuffer` (Emscripten pthreads). A plain file server won't work.
 
-The page fetches firmware files (~17MB total) and the WASM binary (33MB), then boots the emulator.
+The page fetches firmware files (~17MB total) and the locally generated WASM binary, then boots the emulator.
 
 ## Controls
 
@@ -122,7 +120,7 @@ Firmware files come from the Pebble SDK 4.9.77 (emery platform):
 └── qemu_spi_flash.bin.bz2     # 16MB decompressed — filesystem (decompress with bunzip2)
 ```
 
-Place `qemu_micro_flash.bin` and `qemu_spi_flash.bin` in both `firmware/` (native) and `web/` (WASM).
+Place `qemu_micro_flash.bin` and `qemu_spi_flash.bin` in both a local `firmware/` directory (native) and `web/` (WASM). Those firmware files are not tracked in this repo.
 
 ## Project structure
 
@@ -144,11 +142,11 @@ Place `qemu_micro_flash.bin` and `qemu_spi_flash.bin` in both `firmware/` (nativ
 ├── include/hw/arm/          # Headers (stm32_common, pebble, clktree)
 ├── patches/                 # QEMU source patches
 ├── scripts/                 # Build helper scripts
-├── firmware/                # Pebble firmware binaries (not checked in)
+├── firmware/                # Local Pebble firmware binaries (not checked in)
 └── web/                     # WASM artifacts + HTML pages
     ├── test.html            #   Test page
-    ├── qemu-system-arm.js   #   Emscripten loader (343KB)
-    ├── qemu-system-arm.wasm #   QEMU binary (33MB)
+    ├── qemu-system-arm.js   #   Emscripten loader
+    ├── qemu-system-arm.wasm #   Generated locally, not checked in
     └── qemu-system-arm.worker.js
 ```
 

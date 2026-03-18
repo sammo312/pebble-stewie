@@ -1,5 +1,7 @@
 # Agent Flow Redesign Plan
 
+> Status: proposal only. The current runtime still asks the model for canonical graph JSON directly.
+
 ## Goal
 
 Turn the current "LLM generates the per-turn Pebble UI payload" demo into a deterministic, useful agent product that still works on constrained watches.

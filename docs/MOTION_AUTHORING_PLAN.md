@@ -1,5 +1,7 @@
 # Motion Authoring Plan
 
+> Status: partially implemented for `draw` screens via `motion` + compiled `drawing`. The broader cross-screen motion work here is still a proposal.
+
 ## Goal
 
 Keep the existing native draw engine and payload format, but stop making humans author raw draw steps directly.

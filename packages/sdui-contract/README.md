@@ -1,21 +1,58 @@
 # @pebble/sdui-contract
 
-Shared SDUI contract package for Pebble Stewie runtime and web builder.
+Shared contract package for the Pebble Stewie watch runtime, PKJS runtime, and web builder.
 
-## Exports
+## What it includes
 
-- `constants`: runtime limits/enums (`MAX_*`, slots, icons, schema version)
-- `schemaRegistry`: versioned schema descriptors used by normalization/builders
-- `textUtils`: sanitize/limit helpers
-- `screenActions`: card action normalization/encoding
-- `graphSchema`: canonical graph normalization (`normalizeCanonicalGraph`)
-- `builderElements`: canonical form field descriptors for schema builders
+- schema constants and version registry
+- canonical graph normalization and migration
+- run normalization and action encoding helpers
+- template and runtime value helpers
+- draw payload codec
+- semantic motion compiler for draw screens
+- builder field definitions derived from the current schema descriptor
+
+## Main exports
+
+- `constants`
+- `schemaRegistry`
+- `textUtils`
+- `runtimeValues`
+- `drawCodec`
+- `motionCompiler`
+- `screenActions`
+- `graphSchema`
+- `builderElements`
+
+## Notes
+
+- The package is published as CommonJS.
+- ESM consumers can use default interop (`const contract = mod.default || mod`).
+
+## Version discovery
+
+```js
+const contract = require('@pebble/sdui-contract')
+
+console.log(contract.schemaRegistry.listSchemaVersions())
+console.log(contract.schemaRegistry.getLatestSchemaVersion())
+```
 
 ## Example
 
 ```js
 const contract = require('@pebble/sdui-contract')
 
-const normalized = contract.graphSchema.normalizeCanonicalGraph(rawGraph)
+const latest = contract.schemaRegistry.getLatestSchemaVersion()
+const normalized = contract.graphSchema.normalizeCanonicalGraph(rawGraph, latest)
 const spec = contract.builderElements.deriveBuilderSpecFromGraph(normalized)
+const drawing = contract.motionCompiler.compileMotionToDrawing({
+  version: 1,
+  playMode: 'once',
+  background: 'grid',
+  timelineMs: 1200,
+  tracks: []
+}).drawing
 ```
+
+`normalizeCanonicalGraph()` migrates older supported schema versions forward to the target version.

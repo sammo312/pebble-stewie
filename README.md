@@ -1,147 +1,60 @@
-# pebble-stewie (SDUI + Direct OpenAI)
-<img width="300" height="300" alt="kawaistew" src="https://github.com/user-attachments/assets/d1275c0d-d4bb-41a9-9bb0-7a1b7b026958" />
+# pebble-stewie
 
+Pebble watch app prototype where the watch mostly renders a canonical SDUI graph and the phone runtime owns graph state, storage, bindings, and optional OpenAI calls.
 
-Pebble app prototype where the watch is only a renderer.
-Phone PKJS handles state, can call OpenAI directly, and sends compact UI schema to the watch.
+## Current capabilities
 
-## Loop
+- Canonical schema: `pebble.sdui.v1.2.0`
+- Screen types: `menu`, `card`, `scroll`, `draw`
+- Run types: `navigate`, `set_var`, `store`, `agent_prompt`, `agent_command`, `effect`, `dictation`
+- Runtime features: `onEnter`, `onExit`, screen timers, template rendering, live bindings, phone-side storage namespaces
+- Shared contract package consumed by PKJS, the web builder, and tests
 
-1. Phone sends screen (`menu` or `card`).
-2. Watch renders it.
-3. User clicks or dictates.
-4. Watch sends action (`ready`, `select`, `back`, `voice`).
-5. Phone calls OpenAI with user input + context.
-6. OpenAI returns the next canonical screen graph.
+## Docs
 
-## Architecture
+- [Documentation index](docs/README.md)
+- [Screen guide](docs/SCREEN_SCHEMA_GUIDE.md)
+- [Canonical schema spec](docs/SDUI_SCHEMA_SPEC.md)
+- [Pebble UI mapping](docs/PEBBLE_UI_ELEMENTS.md)
+- [Design language notes](docs/PEBBLE_DESIGN_LANGUAGE.md)
 
-- Watch entrypoint: [src/c/main.c](/Users/sam/dev/pebble/pebble-stewie/src/c/main.c)
-- Watch runtime modules: [src/c/stewie](/Users/sam/dev/pebble/pebble-stewie/src/c/stewie)
-- Phone brain: [src/pkjs/index.js](/Users/sam/dev/pebble/pebble-stewie/src/pkjs/index.js)
-- Experimental legacy backend: [backend/legacy/openai-sdui-server.mjs](/Users/sam/dev/pebble/pebble-stewie/backend/legacy/openai-sdui-server.mjs)
-- Message keys: [package.json](/Users/sam/dev/pebble/pebble-stewie/package.json)
-- Screen authoring guide: [SCREEN_SCHEMA_GUIDE.md](/Users/sam/dev/pebble/pebble-stewie/docs/SCREEN_SCHEMA_GUIDE.md)
-- SDUI import/export spec: [docs/SDUI_SCHEMA_SPEC.md](/Users/sam/dev/pebble/pebble-stewie/docs/SDUI_SCHEMA_SPEC.md)
-- Pebble design-language notes: [docs/PEBBLE_DESIGN_LANGUAGE.md](/Users/sam/dev/pebble/pebble-stewie/docs/PEBBLE_DESIGN_LANGUAGE.md)
-- UI support roadmap: [docs/UI_SUPPORT_PLAN.md](/Users/sam/dev/pebble/pebble-stewie/docs/UI_SUPPORT_PLAN.md)
-- Shared schema contract: [packages/sdui-contract](/Users/sam/dev/pebble/pebble-stewie/packages/sdui-contract)
-- Web builder scaffold: [apps/screen-builder-web](/Users/sam/dev/pebble/pebble-stewie/apps/screen-builder-web)
+## Monorepo layout
 
-## Monorepo Layout
+- `src/c`: Pebble watch runtime
+- `src/pkjs`: phone runtime, transport, configuration, and OpenAI integration
+- `packages/sdui-contract`: shared schema, normalizers, run helpers, motion compiler
+- `apps/screen-builder-web`: Next.js builder and emulator-backed preview workspace
+- `apps/pebble-qemu-wasm-main`: standalone browser QEMU/WASM emulator project
 
-- `packages/sdui-contract`: canonical constants, normalizers, and builder element descriptors
-- `src/pkjs/*.js`: thin wrappers importing shared contract modules
-- `apps/screen-builder-web`: builder workspace that consumes the same contract package
+## Quick start
 
-Builder quick run:
+Install workspace dependencies:
 
 ```bash
 pnpm install
+```
+
+Run the shared test suite:
+
+```bash
+pnpm test
+```
+
+Run the full validation set:
+
+```bash
+pnpm run check
+pnpm run check:builder
+pnpm run check:ci
+```
+
+Run the builder:
+
+```bash
 pnpm --filter screen-builder-web dev
 ```
 
-Legacy graph imports are supported, but the builder always normalizes and exports the latest canonical schema.
-
-## Message Protocol
-
-### Phone -> Watch (`msgType = 1`)
-
-- `uiType`: `1` menu, `2` card
-- `screenId`: stable ID
-- `title`: title
-- `items`: newline-delimited `id|label` for menu
-- `body`: card body for card
-- `actions`: newline-delimited `slot|id|icon` for card action bar (`up|select|down`)
-
-### Watch -> Phone (`msgType = 2`)
-
-- `actionType`: `1` ready, `2` select, `3` back, `4` voice transcript
-- `actionScreenId`: current screen ID
-- `actionItemId`: selected item ID
-- `actionIndex`: selected row index
-- `actionText`: transcript for voice action
-
-## Direct OpenAI Contract
-
-PKJS sends a `POST https://api.openai.com/v1/responses` request with your configured key:
-
-```json
-{
-  "schemaVersion": "pebble.sdui.v1.2.0",
-  "model": "gpt-4.1-mini",
-  "input": "...system prompt plus watch context and user input..."
-}
-```
-
-The runtime then extracts the first JSON object from the model response and normalizes it into the canonical Pebble graph schema.
-
-## Experimental Legacy Backend
-
-`backend/legacy/openai-sdui-server.mjs` is kept only as an unsupported legacy reference. It still targets the older turn-schema/backend transport and is not part of the supported production runtime path.
-
-If you want to revive a backend-mediated transport later, do it behind an explicit transport switch rather than relying on stale settings keys.
-
-Legacy backend response shape:
-
-```json
-{
-  "conversationId": "thread-id",
-  "graph": {
-    "schemaVersion": "pebble.sdui.v1",
-    "entryScreenId": "root",
-    "screens": {
-      "root": {
-        "id": "root",
-        "type": "card",
-        "title": "Question",
-        "body": "Choose one action",
-        "actions": [
-          { "slot": "select", "id": "confirm", "icon": "check", "label": "Confirm", "value": "confirm" }
-        ]
-      }
-    }
-  }
-}
-```
-
-## Legacy Backend Run (unsupported)
-
-```bash
-# default key file used automatically: ~/.config/openai/key
-export OPENAI_MODEL="gpt-4.1-mini"   # optional
-export PORT=8787                       # optional
-node backend/legacy/openai-sdui-server.mjs
-```
-
-Optional explicit key file path:
-
-```bash
-export OPENAI_API_KEY_FILE="$HOME/.config/openai/key"
-node backend/legacy/openai-sdui-server.mjs
-```
-
-Optional direct key via env var (overrides key file):
-
-```bash
-export OPENAI_API_KEY="YOUR_KEY"
-node backend/legacy/openai-sdui-server.mjs
-```
-
-Optional backend auth token:
-
-```bash
-export BACKEND_TOKEN="some-shared-secret"
-```
-
-Optional verbose OpenAI wire logs (off by default):
-
-```bash
-export OPENAI_DEBUG_LOG=1
-export OPENAI_LOG_MAX_CHARS=2000   # optional truncation limit
-```
-
-## Build + Install
+Build and install the Pebble app:
 
 ```bash
 pebble clean
@@ -149,21 +62,70 @@ pebble build
 pebble install --phone <PHONE_IP> --logs
 ```
 
-## App Settings (Import + OpenAI Key)
+## Architecture
 
-- Settings are in the Pebble/Rebble **phone app**, not on the watch UI.
-- Path: `My Pebble` -> `Watchapps` -> `pebble-stewie` -> `Settings`.
-- If `Settings` is missing, reinstall the app after this manifest change (`"capabilities": ["configurable"]` in `package.json`).
+- Watch entrypoint: `src/c/main.c`
+- Watch runtime modules: `src/c/stewie/`
+- Phone runtime entrypoint: `src/pkjs/index.js`
+- Shared schema/runtime package: `packages/sdui-contract/`
+- Legacy backend reference: `backend/legacy/openai-sdui-server.mjs`
 
-## Notes
+## App configuration
 
-- Agent mode uses the canonical graph schema + your OpenAI key/model from app settings.
-- Canonical graph authoring/export now targets `pebble.sdui.v1.2.0`; older imports are migrated on load.
-- Voice input still works through watch dictation (`actionType = 4`).
+Pebble/Rebble phone app path:
 
-## Future Schema Strategy
+`My Pebble -> Watchapps -> pebble-stewie -> Settings`
 
-- The runtime now supports schema-defined `run` actions for user-triggered effects and `bindings` for native/live values such as `device.time`.
-- Built-in screens, imported graphs, and agent responses now target the same graph schema.
-- Next step is expanding schema coverage to more Pebble UI primitives, including first-class input screens, in a stable, versioned contract.
-- Keep normalization strict in backend/PKJS so unsupported fields degrade safely instead of crashing render paths.
+Settings currently support:
+
+- `Schema JSON`: imported canonical graph JSON
+- `OpenAI API Key`: optional Responses API key
+- `OpenAI Model`: optional override of the default model
+
+Imported graphs are normalized before activation. Invalid JSON renders an import error card instead of crashing the runtime.
+
+## Direct OpenAI flow
+
+If an OpenAI key is configured, PKJS can call `POST https://api.openai.com/v1/responses` and ask the model to return exactly one canonical graph object. The default model in this repo is `gpt-4.1-mini`.
+
+The request body is the current Responses API shape, not a custom schema wrapper:
+
+```json
+{
+  "model": "gpt-4.1-mini",
+  "instructions": "...canonical graph system prompt...",
+  "input": "Runtime context:\n{\"schemaVersion\":\"pebble.sdui.v1.2.0\",...}",
+  "previous_response_id": "resp_..."
+}
+```
+
+The supported runtime path is:
+
+1. User acts on the watch.
+2. PKJS resolves any local run behavior first.
+3. If the action targets the agent, PKJS builds watch/runtime context.
+4. OpenAI returns a canonical graph.
+5. PKJS normalizes it to `pebble.sdui.v1.2.0` and sends the next screen to the watch.
+
+## Wire protocol
+
+### Phone -> Watch (`msgType = 1`)
+
+- `uiType`: `1` menu, `2` card, `3` scroll, `4` draw, `5` voice
+- `screenId`, `title`, `body`
+- `items`: newline-delimited menu rows
+- `actions`: newline-delimited card actions or scroll select-drawer actions
+- `drawing`: encoded draw payload for `draw`
+- `effectVibe`, `effectLight`: one-shot native effects applied on render
+
+### Watch -> Phone (`msgType = 2`)
+
+- `actionType`: `1` ready, `2` select, `3` back, `4` voice transcript
+- `actionScreenId`: current screen id
+- `actionItemId`: selected row or action id
+- `actionIndex`: selected row index
+- `actionText`: dictation transcript
+
+## Legacy backend
+
+`backend/legacy/openai-sdui-server.mjs` is kept as an unsupported reference for the older backend-mediated flow. The supported runtime path in this repo is the direct PKJS/OpenAI transport.

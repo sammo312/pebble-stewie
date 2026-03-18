@@ -1,48 +1,22 @@
 # Pebble Stewie Canonical Schema (`pebble.sdui.v1.2.0`)
 
-This is the canonical schema for Pebble Stewie. Older `v1` and `v1.1.0` graphs are accepted on import, then normalized to this version.
+This is the current canonical contract shared by the watch runtime, PKJS runtime, builder, and tests.
 
-Everything should use this shape:
+Older `pebble.sdui.v1` and `pebble.sdui.v1.1.0` graphs are accepted on import and normalized forward to `pebble.sdui.v1.2.0`.
 
-- built-in static screens
-- imported JSON from app settings
-- agent responses
-
-There is no separate turn schema anymore.
-
-## Canonical graph format
+## Top-level graph
 
 ```json
 {
   "schemaVersion": "pebble.sdui.v1.2.0",
+  "storageNamespace": "optional_graph_store",
   "entryScreenId": "root",
   "screens": {
     "root": {
       "id": "root",
       "type": "menu",
       "title": "Main Menu",
-      "items": [
-        {
-          "id": "status",
-          "label": "Status",
-          "run": { "type": "navigate", "screen": "status-card" }
-        }
-      ]
-    },
-    "status-card": {
-      "id": "status-card",
-      "type": "card",
-      "title": "Status",
-      "body": "Everything looks good.",
-      "actions": [
-        {
-          "slot": "select",
-          "id": "home",
-          "icon": "check",
-          "label": "Home",
-          "run": { "type": "navigate", "screen": "root" }
-        }
-      ]
+      "items": []
     }
   }
 }
@@ -52,115 +26,151 @@ There is no separate turn schema anymore.
 
 - `schemaVersion`
   - required
-  - must be `pebble.sdui.v1.2.0`
+  - canonical output must be `pebble.sdui.v1.2.0`
 - `entryScreenId`
   - required
-  - must point to a screen in `screens`
+  - must resolve to a screen in `screens`
 - `screens`
   - required
   - object keyed by screen id
+- `storageNamespace`
+  - optional
+  - used for persisted phone-side graph storage
+  - sanitized to the runtime id format
 
-## Screen object
+## Shared screen fields
 
-Each screen has:
+Every screen normalizes to:
 
 - `id`
 - `type`
 - `title`
-- optional `body`
+- `body`
 - optional `titleTemplate`
 - optional `bodyTemplate`
 - optional `bindings`
-- optional `input`
+- `input`
+- optional `onEnter`
+- optional `onExit`
+- optional `timer`
 
-Depending on `type`, it also has:
+### `screen.id`
 
-- `items` for `menu`
-- `actions` for `card`
+- sanitized to `[a-z0-9_-]`
+- max 31 chars in the shared contract
 
 ### `screen.type`
 
-Allowed values:
+Current screen types:
 
 - `menu`
 - `card`
+- `scroll`
+- `draw`
+
+Normalization is permissive today: unsupported screen types fall back to the schema default, which is `menu`.
 
 ### `screen.title`
 
-- string
-- hard-limited to 30 chars in PKJS
+- required
+- max 30 chars
 
 ### `screen.body`
 
-- string
-- hard-limited to 180 chars in PKJS
+- max 180 chars for `menu`, `card`, and `draw`
+- max 1024 chars for `scroll`
 
-### `screen.titleTemplate` / `screen.bodyTemplate`
+Defaults:
 
-- optional template strings
-- use `{{binding.path}}`
+- empty `card` with no actions becomes `Done.`
+- empty `scroll` becomes `No content.`
+- empty `draw` becomes `Animated drawing`
+
+### `titleTemplate` / `bodyTemplate`
+
+Templates resolve at render time. Available sources:
+
+- `{{var.key}}`
+- `{{storage.key}}`
+- `{{timer.remaining}}`
+- binding aliases from `screen.bindings`
+
+### `bindings`
+
+Bindings create local aliases for runtime values.
+
+Currently supported binding sources:
+
+- `device.time`
+- `storage.<key>`
 
 Example:
 
 ```json
 {
-  "bodyTemplate": "{{time.localString}}"
-}
-```
-
-### `screen.bindings`
-
-Bindings inject native/live values into templates.
-
-Current supported source:
-
-- `device.time`
-
-Binding shape:
-
-```json
-{
-  "time": {
-    "source": "device.time",
-    "live": true,
-    "refreshMs": 30000
+  "bindings": {
+    "time": {
+      "source": "device.time",
+      "live": true,
+      "refreshMs": 30000
+    },
+    "best": {
+      "source": "storage.high_score",
+      "live": false
+    }
   }
 }
 ```
 
-Available time fields:
+### `input`
 
-- `time.localString`
-- `time.localTime`
-- `time.iso`
-- `time.timestamp`
-
-### `screen.input`
-
-`input` is screen-local and currently only controls menu voice behavior.
-
-Supported fields:
-
-- `mode`
-  - `menu`
-  - `voice`
-  - `menu_or_voice`
-
-Default:
+Normalized shape:
 
 ```json
 { "mode": "menu" }
 ```
 
-Runtime behavior:
+Allowed values:
 
-- `menu`: render items only
-- `voice`: add `Speak response` row
-- `menu_or_voice`: render items and add `Speak response`
+- `menu`
+- `voice`
+- `menu_or_voice`
 
-## Menu screens
+Current runtime behavior:
 
-Menu screens use `items`.
+- voice affordances are injected for menu screens
+- non-menu screens still normalize this field, but the current watch UI only uses it for menu interaction paths
+
+### `onEnter` / `onExit`
+
+Optional arrays of hook runs. Hook runs only keep local-safe types:
+
+- `navigate`
+- `set_var`
+- `store`
+- `effect`
+
+Each screen supports up to 6 hook runs per hook list.
+
+### `timer`
+
+Optional one-shot delayed run:
+
+```json
+{
+  "durationMs": 5000,
+  "run": { "type": "navigate", "screen": "next" }
+}
+```
+
+- minimum `durationMs`: 100
+- maximum `durationMs`: 86400000
+
+## Screen-specific fields
+
+### `menu`
+
+Uses `items`.
 
 ```json
 {
@@ -169,69 +179,38 @@ Menu screens use `items`.
   "title": "Main Menu",
   "items": [
     {
-      "id": "controls",
-      "label": "Controls",
-      "run": { "type": "navigate", "screen": "controls" }
+      "id": "status",
+      "label": "Status",
+      "run": { "type": "navigate", "screen": "status" }
     }
   ]
 }
 ```
 
-### Menu item fields
+#### Menu item fields
 
 - `id`
-  - sanitized to `[a-z0-9_-]`
-  - max 22 chars in PKJS
-  - unique within the screen
 - `label`
-  - max 20 chars
 - optional `labelTemplate`
 - optional `value`
 - optional `run`
 
-### `value`
+Limits:
 
-`value` is response data.
+- max items: 8
+- max label length: 20
+- max id length: 22
 
-Runtime behavior:
+### `card`
 
-- on agent-owned graphs, selecting an item with `value` and no `run` sends that value back to the agent
-- on static/imported local graphs, `run` is the usual way to cause behavior
-
-### `run`
-
-`run` is the only effect hook.
-
-Supported `run.type` values:
-
-- `navigate`
-- `agent_prompt`
-- `agent_command`
-
-Examples:
-
-```json
-{ "type": "navigate", "screen": "root" }
-```
-
-```json
-{ "type": "agent_prompt", "prompt": "Start a short conversation." }
-```
-
-```json
-{ "type": "agent_command", "command": "reset" }
-```
-
-## Card screens
-
-Card screens use `actions`.
+Uses `actions`.
 
 ```json
 {
-  "id": "status-card",
+  "id": "status",
   "type": "card",
   "title": "Status",
-  "body": "Everything looks good.",
+  "body": "All systems nominal.",
   "actions": [
     {
       "slot": "select",
@@ -244,143 +223,275 @@ Card screens use `actions`.
 }
 ```
 
-### Card action fields
+#### Card action fields
 
 - `slot`
-  - one of `up`, `select`, `down`
-  - unique per card
 - `id`
-  - sanitized to `[a-z0-9_-]`
-  - max 22 chars
-  - unique within the card
 - `icon`
-  - one of `play`, `pause`, `check`, `x`, `plus`, `minus`
-  - invalid values default to `check`
-- `label`
-  - max 20 chars
+- optional `label`
+- optional `labelTemplate`
 - optional `value`
 - optional `run`
 
-Runtime behavior:
+Rules:
 
-- on agent-owned graphs, selecting an action with `value` and no `run` sends that value back to the agent
-- on local graphs, actions usually use `run`
+- `slot` must be `up`, `select`, or `down`
+- slots must be unique per card
+- max actions: 3
+- invalid icons fall back to `check`
 
-## Runtime rules
+Supported icons:
 
-- The app starts at `entryScreenId`.
-- `run.type = "navigate"` changes screens within the same graph.
-- Back navigation uses screen history.
-- Menu screens render `items`.
-- Card screens render `actions`.
-- `voice` / `menu_or_voice` inject a `Speak response` row into menu screens.
-- `bindings.live = true` causes periodic re-render of the current screen.
+- `play`
+- `pause`
+- `check`
+- `x`
+- `plus`
+- `minus`
 
-## Limits
+### `scroll`
 
-Actual runtime limits:
-
-- `title <= 30`
-- `body <= 180`
-- `items <= 8`
-- `item.label <= 20`
-- `actions <= 3`
-- `action.label <= 20`
-
-Recommended safe authoring limits:
-
-- `title <= 24`
-- `body <= 140`
-- `label <= 18`
-
-## Minimal examples
-
-### Final card graph
+Uses long `body` text plus optional Select drawer actions.
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1.2.0",
-  "entryScreenId": "done",
-  "screens": {
-    "done": {
+  "id": "notes",
+  "type": "scroll",
+  "title": "Notes",
+  "body": "Long text...",
+  "actions": [
+    {
       "id": "done",
-      "type": "card",
-      "title": "Done",
-      "body": "Your settings were saved."
+      "label": "Done",
+      "run": { "type": "navigate", "screen": "root" }
     }
-  }
+  ]
 }
 ```
 
-### Menu graph with navigation
+#### Scroll action fields
+
+- `id`
+- `label`
+- optional `labelTemplate`
+- optional `value`
+- optional `run`
+
+Rules:
+
+- max actions: 6
+- Select opens an `ActionMenu` when actions exist
+
+### `draw`
+
+Uses custom animation data rendered by the watch draw engine.
+
+Two authoring paths are supported:
+
+1. `motion` with optional `canvas`
+2. raw `drawing`
+
+If `motion` is present, the shared compiler emits normalized `drawing` data automatically.
+
+#### `canvas`
+
+Current templates:
+
+- `freeform`
+- `header_list`
+
+`header_list` also supports:
+
+- `header`
+- up to 4 `items`
+
+#### `motion`
+
+Normalized shape:
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1.2.0",
-  "entryScreenId": "root",
-  "screens": {
-    "root": {
-      "id": "root",
-      "type": "menu",
-      "title": "Pick one",
-      "items": [
-        {
-          "id": "yes",
-          "label": "Yes",
-          "run": { "type": "navigate", "screen": "yes-card" }
-        },
-        {
-          "id": "no",
-          "label": "No",
-          "run": { "type": "navigate", "screen": "no-card" }
-        }
-      ]
-    },
-    "yes-card": {
-      "id": "yes-card",
-      "type": "card",
-      "title": "Yes",
-      "body": "You picked yes."
-    },
-    "no-card": {
-      "id": "no-card",
-      "type": "card",
-      "title": "No",
-      "body": "You picked no."
-    }
-  }
+  "version": 1,
+  "playMode": "ping_pong",
+  "background": "grid",
+  "timelineMs": 1800,
+  "tracks": []
 }
 ```
 
-### Live time card
+Track fields:
+
+- `id`
+- `label`
+- `target`
+- `kind`
+- `preset`
+- `placement`
+- `color`
+- `fill`
+- `speed`
+- `intensity`
+- `delayMs`
+- `staggerMs`
+
+Enums:
+
+- `preset`: `fade`, `slide_up`, `slide_left`, `pulse`, `hover`, `blink`, `orbit`
+- `placement`: `top`, `middle`, `bottom`
+- `kind`: `circle`, `rect`, `text`
+- `color`: `ink`, `accent`, `accent2`, `danger`
+- `speed`: `fast`, `normal`, `slow`
+- `intensity`: `low`, `medium`, `high`
+- `playMode`: `loop`, `once`, `ping_pong`
+- `background`: `grid`, `dark`, `light`
+
+#### `drawing`
+
+Raw draw payload fields:
+
+- `playMode`
+- `background`
+- `timelineMs`
+- `steps`
+
+Each step contains:
+
+- `id`
+- `label`
+- `kind`
+- `color`
+- `fill`
+- `x`, `y`, `toX`, `toY`
+- `width`, `height`
+- `delayMs`, `durationMs`
+- `fromScale`, `toScale`
+- `fromOpacity`, `toOpacity`
+
+Max draw steps: 6
+
+## `run` object
+
+Current run types:
+
+- `navigate`
+- `set_var`
+- `store`
+- `agent_prompt`
+- `agent_command`
+- `effect`
+- `dictation`
+
+Runs may also include optional native effects:
+
+- `vibe`: `short`, `long`, `double`
+- `light`: `true`
+
+### `navigate`
 
 ```json
 {
-  "schemaVersion": "pebble.sdui.v1.2.0",
-  "entryScreenId": "time-card",
-  "screens": {
-    "time-card": {
-      "id": "time-card",
-      "type": "card",
-      "title": "Phone Time",
-      "bodyTemplate": "{{time.localString}}",
-      "bindings": {
-        "time": {
-          "source": "device.time",
-          "live": true,
-          "refreshMs": 30000
-        }
-      }
-    }
+  "type": "navigate",
+  "screen": "next",
+  "condition": { "var": "count", "op": "gte", "value": "2" }
+}
+```
+
+`condition.op` may be:
+
+- `eq`
+- `neq`
+- `gt`
+- `gte`
+- `lt`
+- `lte`
+
+### `set_var`
+
+```json
+{
+  "type": "set_var",
+  "key": "count",
+  "value": "increment"
+}
+```
+
+Supported value forms:
+
+- `increment`
+- `decrement`
+- `toggle`
+- `true`
+- `false`
+- numeric strings
+- `literal:<text>`
+
+### `store`
+
+```json
+{
+  "type": "store",
+  "key": "best_score",
+  "value": "{{var.count}}"
+}
+```
+
+Stored values are resolved through the template engine, then persisted as strings in phone storage for the current graph namespace.
+
+### `agent_prompt`
+
+```json
+{
+  "type": "agent_prompt",
+  "prompt": "Summarize today"
+}
+```
+
+### `agent_command`
+
+Current commands used by the runtime:
+
+- `reset`
+- `more_replies`
+
+### `effect`
+
+```json
+{
+  "type": "effect",
+  "vibe": "short",
+  "light": true
+}
+```
+
+### `dictation`
+
+```json
+{
+  "type": "dictation",
+  "variable": "transcript",
+  "screen": "optional_screen_after_capture",
+  "then": {
+    "type": "agent_prompt",
+    "prompt": "{{var.transcript}}"
   }
 }
 ```
 
-## Not implemented yet
+Fields:
 
-These are not part of the current runtime:
+- `variable`: required session variable key
+- `screen`: optional follow-up screen id
+- `then`: optional nested run executed after the transcript is stored
 
-- first-class `input` screen type
-- workflow patch protocol
-- extra native bindings beyond `device.time`
-- legacy `next` / `agentPrompt` / `agentCommand`
+## Limits summary
+
+- title: 30
+- body: 180
+- scroll body: 1024
+- menu items: 8
+- card actions: 3
+- scroll drawer actions: 6
+- hooks per list: 6
+- draw steps / motion tracks: 6
+- action id: 22
+- screen id: 31
