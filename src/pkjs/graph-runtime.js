@@ -1,5 +1,7 @@
 'use strict';
 
+var agentUx = require('./agent-ux');
+
 function executeTypedAction(run, source, deps) {
   if (!run || typeof run !== 'object') {
     return false;
@@ -41,6 +43,11 @@ function executeTypedAction(run, source, deps) {
       deps.queueRunEffects(run);
       deps.resetAgentConversation(true);
       deps.renderAgentStatusCard('Agent', 'Thread reset.');
+      return true;
+    }
+    if (String(run.command || '') === 'more_replies') {
+      deps.queueRunEffects(run);
+      deps.submitAgentTextInput(agentUx.buildMoreRepliesPrompt(), source || 'schema_action');
       return true;
     }
     return false;

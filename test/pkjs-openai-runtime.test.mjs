@@ -10,6 +10,8 @@ test('buildSystemPrompt bakes the latest schema version into instructions', () =
 
   assert.match(prompt, /schemaVersion/)
   assert.match(prompt, /v9\.9\.9/)
+  assert.match(prompt, /watch\.supportsDictation/)
+  assert.match(prompt, /more_replies/)
   assert.match(prompt, /return valid JSON only/i)
 })
 

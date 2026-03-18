@@ -151,6 +151,24 @@ test('executeTypedAction prepares dictation screens and pending state', () => {
   ])
 })
 
+test('executeTypedAction handles more_replies agent command', () => {
+  const { deps, events } = createDeps()
+
+  assert.equal(
+    graphRuntime.executeTypedAction({ type: 'agent_command', command: 'more_replies' }, 'menu_item', deps),
+    true
+  )
+
+  assert.deepEqual(events, [
+    ['queueRunEffects', 'agent_command'],
+    [
+      'submitAgentTextInput',
+      'System task: generate 4 short, distinct tap-friendly replies the user could send next. Return a menu screen. Keep item labels under 18 chars. Set each item value to the exact reply text to send. Avoid generic yes/no unless it is clearly the best fit.',
+      'menu_item'
+    ]
+  ])
+})
+
 test('executeHookRuns returns the last redirect while preserving side effects', () => {
   const { deps, events } = createDeps()
 

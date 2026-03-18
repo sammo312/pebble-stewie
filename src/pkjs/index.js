@@ -13,6 +13,7 @@ var graphSchema = require('./graph-schema');
 var renderRuntime = require('./render-runtime');
 var openaiRuntime = require('./openai-runtime');
 var graphRuntime = require('./graph-runtime');
+var agentUx = require('./agent-ux');
 var inputRuntime = require('./input-runtime');
 var transportRuntime = require('./transport-runtime');
 var configurationRuntime = require('./configuration-runtime');
@@ -22,6 +23,7 @@ var ACTION_TYPE_READY = constants.ACTION_TYPE_READY;
 var ACTION_TYPE_SELECT = constants.ACTION_TYPE_SELECT;
 var ACTION_TYPE_BACK = constants.ACTION_TYPE_BACK;
 var ACTION_TYPE_VOICE = constants.ACTION_TYPE_VOICE;
+var MAX_TITLE_LEN = constants.MAX_TITLE_LEN;
 var MAX_BODY_LEN = constants.MAX_BODY_LEN;
 var MAX_SCROLL_BODY_LEN = constants.MAX_SCROLL_BODY_LEN;
 var VOICE_INPUT_ITEM_ID = constants.VOICE_INPUT_ITEM_ID;
@@ -489,6 +491,9 @@ function getWatchProfile() {
   var profile = {
     platform: '',
     supportsColour: true,
+    supportsDictation: true,
+    preferTapInput: true,
+    preferSuggestedReplies: true,
     screenWidth: 144,
     screenHeight: 168
   };
@@ -506,6 +511,7 @@ function getWatchProfile() {
 
   if (info.platform === 'aplite' || info.platform === 'diorite') {
     profile.supportsColour = false;
+    profile.supportsDictation = false;
     profile.screenWidth = 144;
     profile.screenHeight = 168;
   } else if (info.platform === 'chalk') {
@@ -577,7 +583,7 @@ function pruneAgentHistory() {
 
 function renderAgentGraph(graph) {
   pruneAgentHistory();
-  activateGraph(graph, 'agent', false);
+  activateGraph(agentUx.augmentAgentGraph(graph, getWatchProfile()), 'agent', false);
 }
 
 function renderAgentFallback(text) {
